@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.18c";
+const APP_VERSION = "2026.09.18d";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -341,7 +341,7 @@ const dataPanelHtml = () => `<details class="data"><summary>Veri · dışa/içe 
 /* ============ rehber penceresi ============ */
 function openPicker(type, btn){
   const r = btn.getBoundingClientRect();
-  S.picker = { type, q: '', rect: { top: r.bottom, right: r.right, left: r.left } };
+  S.picker = { type, q: '', all: false, rect: { top: r.bottom, right: r.right, left: r.left } };
   renderPicker();
 }
 function closePicker(){
@@ -382,15 +382,18 @@ function renderPicker(){
   } else {
     const cust = (document.getElementById('j-cust')?.value || S.newJob.customer || '').trim();
     const L = projectList(cust);
-    title = 'Proje';
+    const dar = !!cust && !S.picker.all;          // müşteri seçiliyse yalnızca onun projeleri
+    title = cust ? 'Proje · ' + cust : 'Proje';
     const row = p => `<div class="pop-row${p.live ? ' live' : ''}"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}" data-cust="${esc(p.customer)}">
       <span class="pop-nm">${esc(p.name)}</span>
       <span class="pop-sub">${[p.customer && (!cust || norm(p.customer) !== norm(cust)) ? p.customer : '', p.kind, p.year].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
     const f = a => a.filter(p => hit(p.name) || hit(p.customer));
-    body = block('Devam eden işler', f(L.live), row, CAP)
-         + block(cust ? esc(cust) + ' · teklif arşivi' : 'Teklif arşivi', f(L.mine), row, CAP)
-         + block(L.mine.length || L.live.length ? 'Diğer teklifler' : 'Teklif arşivi', f(L.other), row, CAP);
-    if (!body) body = '<div class="pop-empty">Kayıtlı proje yok.</div>';
+    const live = dar ? L.live.filter(p => p.same) : L.live;
+    body = block('Devam eden işler', f(live), row, CAP)
+         + block(dar || !cust ? 'Teklif arşivi' : esc(cust) + ' · teklif arşivi', f(L.mine), row, CAP);
+    if (!dar) body += block(L.mine.length || live.length ? 'Diğer teklifler' : 'Teklif arşivi', f(L.other), row, CAP);
+    if (!body) body = `<div class="pop-empty">${dar ? esc(cust) + ' için kayıtlı proje yok.' : 'Kayıtlı proje yok.'}</div>`;
+    if (dar) addable = `<button class="pop-add" data-act="pop-all">Tüm müşterilerde ara (${L.other.length + (L.live.length - live.length)} kayıt)</button>`;
   }
 
   const back = document.createElement('div');
@@ -580,6 +583,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'open-job-form'){ S.tab = 'jobs'; S.composer = { scope: 'newjob', day: '' }; S.newJob = { customer: '', project: '' }; render(); return; }
   if (a === 'pick'){ openPicker(b.dataset.type, b); return; }
   if (a === 'pop-close'){ closePicker(); return; }
+  if (a === 'pop-all'){ if (S.picker){ S.picker.all = true; renderPicker(); } return; }
   if (a === 'pop-choose'){ pickerChoose(b.dataset.val, b.dataset.cust); return; }
   if (a === 'pop-del'){
     const c = S.contacts.find(x => x.id === id);
