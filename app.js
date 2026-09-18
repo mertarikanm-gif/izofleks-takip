@@ -38,12 +38,13 @@ function rangeLabel(a, b){
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ============ depo: yerel ============ */
+const COLLECTIONS = ['jobs', 'tasks', 'contacts'];
+
 function localStore(){
-  let data = { jobs: [], tasks: [] };
-  try { const raw = localStorage.getItem(LS_KEY); if (raw) data = JSON.parse(raw); } catch(e){}
-  if (!Array.isArray(data.jobs)) data.jobs = [];
-  if (!Array.isArray(data.tasks)) data.tasks = [];
-  const subs = { jobs: [], tasks: [] };
+  let data = {};
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) data = JSON.parse(raw) || {}; } catch(e){}
+  const subs = {};
+  COLLECTIONS.forEach(c => { if (!Array.isArray(data[c])) data[c] = []; subs[c] = []; });
   const persist = () => { try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch(e){ note('Cihaz belleği dolu — kayıt yapılamadı.'); } };
   const emit = c => subs[c].forEach(f => f(data[c].slice()));
   let seq = 0;
@@ -77,11 +78,13 @@ function firestoreStore(fs, uid){
 const S = {
   tab: 'week',
   weekStart: mondayOf(new Date()),
-  jobs: [], tasks: [],
+  jobs: [], tasks: [], contacts: [],
   showDone: false,
   showArchived: false,
   composer: null,
   draft: { text: '', job: '', day: '' },
+  newJob: { customer: '', project: '' },
+  picker: null,          // { type:'customer'|'project', q:'', rect:{...} }
   store: null,
   unsub: [],
   auth: null,          // firebase auth nesnesi (bulut modda)
@@ -113,11 +116,46 @@ const byDone = (a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) || (a.createdAt || 
 const tasksOfDay = d => S.tasks.filter(t => t.day === d && (S.showDone || !t.done)).sort(byDone);
 const undatedTasks = () => S.tasks.filter(t => !t.day && (S.showDone || !t.done)).sort(byDone);
 const lateTasks = () => { const t0 = todayIso(); return S.tasks.filter(t => !t.done && t.day && t.day < t0).sort((a,b) => a.day < b.day ? -1 : 1); };
+/* --- rehber: müşteri/mimar ve proje adları --- */
+const norm = s => String(s || '').trim().toLocaleLowerCase('tr');
+
+function customerList(){
+  const map = new Map();   // normalize -> { name, contactId }
+  S.contacts.forEach(c => { if (c.name && !map.has(norm(c.name))) map.set(norm(c.name), { name: c.name, contactId: c.id }); });
+  S.jobs.forEach(j => { if (j.customer && !map.has(norm(j.customer))) map.set(norm(j.customer), { name: j.customer, contactId: null }); });
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+}
+
+function projectList(customer){
+  const cn = norm(customer);
+  const mine = new Map(), other = new Map();
+  S.jobs.forEach(j => {
+    if (!j.project) return;
+    const bucket = (cn && norm(j.customer) === cn) ? mine : other;
+    if (!bucket.has(norm(j.project))) bucket.set(norm(j.project), { name: j.project, customer: j.customer || '' });
+  });
+  const srt = m => [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  return { mine: srt(mine), other: srt(other) };
+}
+
+function ensureContact(name){
+  if (!name || !name.trim()) return;
+  if (S.contacts.some(c => norm(c.name) === norm(name))) return;
+  S.store.add('contacts', { name: name.trim(), createdAt: Date.now() });
+}
+
 const tasksOfJob = id => S.tasks.filter(t => t.jobId === id && (S.showDone || !t.done)).sort((a, b) => {
   if ((a.done ? 1 : 0) !== (b.done ? 1 : 0)) return (a.done ? 1 : 0) - (b.done ? 1 : 0);
   const ad = a.day || '9999', bd = b.day || '9999';
   return ad < bd ? -1 : ad > bd ? 1 : (a.createdAt || 0) - (b.createdAt || 0);
 });
+
+/* ============ simgeler ============ */
+const ICON_LIST = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+  <circle cx="4.5" cy="5.5" r="1.25"/><circle cx="4.5" cy="10" r="1.25"/><circle cx="4.5" cy="14.5" r="1.25"/>
+  <rect x="8" y="4.75" width="8.5" height="1.5" rx=".75"/>
+  <rect x="8" y="9.25" width="8.5" height="1.5" rx=".75"/>
+  <rect x="8" y="13.75" width="8.5" height="1.5" rx=".75"/></svg>`;
 
 /* ============ parçalar ============ */
 function taskHtml(t, o = {}){
@@ -205,8 +243,14 @@ function jobsView(){
   const newJob = S.composer && S.composer.scope === 'newjob';
   if (newJob){
     h += `<div class="job" style="margin-bottom:12px"><div class="job-b"><div class="composer">
-      <input type="text" id="j-cust" placeholder="Müşteri / mimar (örn. Metrak Mimarlık)" autocomplete="off" aria-label="Müşteri">
-      <input type="text" id="j-proj" placeholder="Proje adı (örn. Hersek Tersanesi)" autocomplete="off" aria-label="Proje">
+      <div class="field">
+        <input type="text" id="j-cust" placeholder="Müşteri / mimar (örn. Metrak Mimarlık)" autocomplete="off" aria-label="Müşteri / mimar">
+        <button class="pick" data-act="pick" data-type="customer" aria-label="Rehberden müşteri seç" title="Rehberden seç">${ICON_LIST}</button>
+      </div>
+      <div class="field">
+        <input type="text" id="j-proj" placeholder="Proje adı (örn. Hersek Tersanesi)" autocomplete="off" aria-label="Proje adı">
+        <button class="pick" data-act="pick" data-type="project" aria-label="Geçmiş projelerden seç" title="Geçmiş projelerden seç">${ICON_LIST}</button>
+      </div>
       <div class="row"><button class="btn primary" data-act="save-job">Kaydet</button>
       <button class="btn ghost" data-act="cancel-composer">İptal</button></div></div></div></div>`;
   }
@@ -248,6 +292,88 @@ const dataPanelHtml = () => `<details class="data"><summary>Veri · dışa/içe 
     <button class="btn" data-act="purge-done">Biten görevleri temizle</button>
   </div></div></details>`;
 
+/* ============ rehber penceresi ============ */
+function openPicker(type, btn){
+  const r = btn.getBoundingClientRect();
+  S.picker = { type, q: '', rect: { top: r.bottom, right: r.right, left: r.left } };
+  renderPicker();
+}
+function closePicker(){
+  S.picker = null;
+  document.getElementById('pop-back')?.remove();
+  document.getElementById('pop')?.remove();
+}
+
+function renderPicker(){
+  document.getElementById('pop-back')?.remove();
+  document.getElementById('pop')?.remove();
+  if (!S.picker) return;
+
+  const { type, q } = S.picker;
+  const hit = n => !q.trim() || norm(n).includes(norm(q));
+  let body = '', title, addable = '';
+
+  if (type === 'customer'){
+    const rows = customerList().filter(c => hit(c.name));
+    title = 'Müşteri / Mimar';
+    body = rows.length
+      ? rows.map(c => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(c.name)}">${esc(c.name)}</button>${
+          c.contactId ? `<button class="pop-del" data-act="pop-del" data-id="${c.contactId}" title="Rehberden sil" aria-label="Rehberden sil">×</button>` : ''
+        }</div>`).join('')
+      : '<div class="pop-empty">Kayıt yok.</div>';
+    const exact = customerList().some(c => norm(c.name) === norm(q));
+    if (q.trim() && !exact) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” rehbere ekle</button>`;
+  } else {
+    const cust = (document.getElementById('j-cust')?.value || S.newJob.customer || '').trim();
+    const { mine, other } = projectList(cust);
+    const m = mine.filter(p => hit(p.name)), o = other.filter(p => hit(p.name));
+    title = 'Proje';
+    const row = p => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}">${esc(p.name)}${
+      p.customer && !cust ? `<span class="pop-sub">${esc(p.customer)}</span>` : ''}</button></div>`;
+    if (m.length) body += `<div class="pop-grp">${esc(cust)} projeleri</div>` + m.map(row).join('');
+    if (o.length) body += `<div class="pop-grp">${m.length ? 'Diğer projeler' : 'Tüm projeler'}</div>` + o.map(row).join('');
+    if (!body) body = '<div class="pop-empty">Kayıtlı proje yok.</div>';
+  }
+
+  const back = document.createElement('div');
+  back.id = 'pop-back';
+  const pop = document.createElement('div');
+  pop.id = 'pop';
+  pop.className = 'pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', title);
+  pop.innerHTML = `<div class="pop-h"><b>${title}</b><button class="pop-x" data-act="pop-close" aria-label="Kapat">×</button></div>
+    <div class="pop-s"><input type="text" id="pop-q" placeholder="Ara ya da yaz…" autocomplete="off" aria-label="Ara" value="${esc(q)}"></div>
+    <div class="pop-l">${body}</div>${addable ? `<div class="pop-f">${addable}</div>` : ''}`;
+
+  document.body.appendChild(back);
+  document.body.appendChild(pop);
+
+  // konumlandır: düğmenin altına, ekran dışına taşmadan
+  const w = pop.offsetWidth, hgt = pop.offsetHeight, m = 12;
+  let left = Math.min(S.picker.rect.right - w, window.innerWidth - w - m);
+  left = Math.max(m, left);
+  let top = S.picker.rect.top + 6;
+  if (top + hgt > window.innerHeight - m) top = Math.max(m, S.picker.rect.top - 6 - hgt);
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+
+  const qi = document.getElementById('pop-q');
+  qi.focus();
+  try { qi.setSelectionRange(qi.value.length, qi.value.length); } catch(e){}
+}
+
+function pickerChoose(val){
+  const type = S.picker.type;
+  const id = type === 'customer' ? 'j-cust' : 'j-proj';
+  const el = document.getElementById(id);
+  if (el) el.value = val;
+  if (type === 'customer') S.newJob.customer = val; else S.newJob.project = val;
+  closePicker();
+  // müşteri seçildiyse sıradaki alan proje
+  document.getElementById(type === 'customer' ? 'j-proj' : 'j-proj')?.focus();
+}
+
 /* ============ render ============ */
 function render(){
   document.getElementById('tab-week').setAttribute('aria-selected', S.tab === 'week');
@@ -255,8 +381,12 @@ function render(){
   main.innerHTML = S.tab === 'week' ? weekView() : jobsView();
   const txt = document.getElementById('c-text');
   if (txt){ txt.value = S.draft.text; txt.focus(); try { txt.setSelectionRange(txt.value.length, txt.value.length); } catch(e){} }
-  const jc = document.getElementById('j-cust');
-  if (jc && !txt){ jc.value = S.draft.text || ''; jc.focus(); }
+  const jc = document.getElementById('j-cust'), jp = document.getElementById('j-proj');
+  if (jc){
+    jc.value = S.newJob.customer || '';
+    if (jp) jp.value = S.newJob.project || '';
+    if (!txt && document.activeElement !== jp) jc.focus();
+  }
 }
 
 function setSync(kind, label){
@@ -301,7 +431,9 @@ function saveJob(){
   const p = (document.getElementById('j-proj')?.value || '').trim();
   if (!c && !p){ note('Müşteri ya da proje adı gerekli.'); return; }
   S.store.add('jobs', { customer: c, project: p, archived: false, ci: S.jobs.length % SWATCH.length, createdAt: Date.now() });
-  S.composer = null; S.draft.text = '';
+  ensureContact(c);
+  S.composer = null; S.newJob = { customer: '', project: '' };
+  closePicker();
   render();
 }
 
@@ -379,7 +511,22 @@ document.addEventListener('click', async (e) => {
   if (a === 'open-composer'){ openComposer(b.dataset.scope, b.dataset.day); return; }
   if (a === 'cancel-composer'){ S.composer = null; S.draft.text = ''; render(); return; }
   if (a === 'save-task'){ saveTask(); return; }
-  if (a === 'open-job-form'){ S.tab = 'jobs'; S.composer = { scope: 'newjob', day: '' }; S.draft.text = ''; render(); return; }
+  if (a === 'open-job-form'){ S.tab = 'jobs'; S.composer = { scope: 'newjob', day: '' }; S.newJob = { customer: '', project: '' }; render(); return; }
+  if (a === 'pick'){ openPicker(b.dataset.type, b); return; }
+  if (a === 'pop-close'){ closePicker(); return; }
+  if (a === 'pop-choose'){ pickerChoose(b.dataset.val); return; }
+  if (a === 'pop-del'){
+    const c = S.contacts.find(x => x.id === id);
+    if (c && confirm(`“${c.name}” rehberden silinsin mi? (İşler etkilenmez)`)) S.store.remove('contacts', id);
+    return;
+  }
+  if (a === 'pop-add'){
+    const v = (document.getElementById('pop-q')?.value || '').trim();
+    if (!v) return;
+    ensureContact(v);
+    pickerChoose(v);
+    return;
+  }
   if (a === 'save-job'){ saveJob(); return; }
   if (a === 'seed'){ seed(); return; }
   if (a === 'install'){ doInstall(); return; }
@@ -455,7 +602,16 @@ document.addEventListener('click', async (e) => {
 sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
 
 document.addEventListener('input', e => {
-  if (e.target.id === 'c-text' || e.target.id === 'j-cust') S.draft.text = e.target.value;
+  if (e.target.id === 'c-text') S.draft.text = e.target.value;
+  if (e.target.id === 'j-cust') S.newJob.customer = e.target.value;
+  if (e.target.id === 'j-proj') S.newJob.project = e.target.value;
+  if (e.target.id === 'pop-q' && S.picker){ S.picker.q = e.target.value; renderPicker(); }
+});
+
+document.addEventListener('mousedown', e => {
+  if (!S.picker) return;
+  if (e.target.closest('#pop') || e.target.closest('[data-act="pick"]')) return;
+  closePicker();
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'c-job') S.draft.job = e.target.value;
@@ -463,11 +619,19 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape'){
+    if (S.picker){ closePicker(); return; }
     if (!sheet.hidden){ closeSheet(); return; }
     if (S.composer){ S.composer = null; S.draft.text = ''; render(); }
     return;
   }
   if (e.key !== 'Enter') return;
+  if (e.target.id === 'pop-q'){
+    e.preventDefault();
+    const first = document.querySelector('#pop .pop-pick');
+    if (first) pickerChoose(first.dataset.val);
+    else if (S.picker.type === 'customer'){ const v = e.target.value.trim(); if (v){ ensureContact(v); pickerChoose(v); } }
+    return;
+  }
   if (e.target.id === 'c-text'){ e.preventDefault(); saveTask(); }
   if (e.target.id === 'j-cust' || e.target.id === 'j-proj'){ e.preventDefault(); saveJob(); }
   if (e.target.id === 'a-mail' || e.target.id === 'a-pass'){ e.preventDefault(); document.querySelector('[data-act="signin"]')?.click(); }
@@ -478,10 +642,11 @@ function bind(store, label, kind){
   S.unsub.forEach(u => { try { u(); } catch(e){} });
   S.unsub = [];
   S.store = store;
-  S.jobs = []; S.tasks = [];
+  S.jobs = []; S.tasks = []; S.contacts = [];
   setSync(kind, label);
-  S.unsub.push(store.subscribe('jobs', rows => { S.jobs = rows.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); render(); }));
+  S.unsub.push(store.subscribe('jobs', rows => { S.jobs = rows.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); render(); renderPicker(); }));
   S.unsub.push(store.subscribe('tasks', rows => { S.tasks = rows; render(); }));
+  S.unsub.push(store.subscribe('contacts', rows => { S.contacts = rows; renderPicker(); }));
 }
 
 /* ============ açılış ============ */
