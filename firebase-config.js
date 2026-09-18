@@ -1,20 +1,19 @@
 /* ------------------------------------------------------------------
-   FIREBASE AYARI
+   FIREBASE AYARI — izofleks-takip projesi
    ------------------------------------------------------------------
-   Buraya Firebase konsolundan aldığın ayarları yapıştır.
-   Doldurmazsan uygulama YEREL modda çalışır: veriler sadece o cihazda
-   durur, telefon ile bilgisayar arasında senkron olmaz.
+   Bu değerler gizli değildir; her Firebase web uygulamasının sayfa
+   kaynağında görünür. Veri güvenliğini Firestore kuralları sağlar:
+   her kullanıcı yalnızca kendi users/<uid>/ altını okuyup yazabilir.
 
-   Nereden alınır:
-   console.firebase.google.com → projen → ⚙ Project settings →
-   "Your apps" → Web app (</>) → "SDK setup and configuration" → Config
+   Konsol: console.firebase.google.com → izofleks-takip
+           ⚙ Project settings → Your apps → is-takibi
 ------------------------------------------------------------------- */
 
 window.IZO_FIREBASE = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyDNg8OupFdWuNe1vth2JRlPCzsLdmyKDks",
+  authDomain: "izofleks-takip.firebaseapp.com",
+  projectId: "izofleks-takip",
+  storageBucket: "izofleks-takip.firebasestorage.app",
+  messagingSenderId: "163236794654",
+  appId: "1:163236794654:web:6dbf6a92c506e41774f90f"
 };
