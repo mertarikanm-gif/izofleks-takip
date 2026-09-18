@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.18";
+const APP_VERSION = "2026.09.18b";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -719,11 +719,30 @@ try {
 render();
 bind(localStore(), 'yerel', 'off');
 
-// teklif arşivinden üretilen müşteri/proje rehberi (statik dosya)
-fetch('./rehber.json')
-  .then(r => r.ok ? r.json() : null)
-  .then(d => { if (d && (d.c || d.p)){ S.ref = { c: d.c || [], p: d.p || [] }; renderPicker(); } })
-  .catch(() => {});
+/* Teklif arşivinden üretilen müşteri/proje rehberi (statik dosya).
+   Uygulama açıkken saatte bir ve her odaklanışta yeniden denetlenir;
+   rehber yayınlandığında sayfayı yenilemeye gerek kalmaz. */
+let refFetched = 0;
+async function loadRef(force){
+  const now = Date.now();
+  if (!force && now - refFetched < 3600000) return;
+  refFetched = now;
+  try {
+    const r = await fetch('./rehber.json?t=' + now, { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d || (!d.c && !d.p)) return;
+    const eski = (S.ref.c || []).length + (S.ref.p || []).length;
+    S.ref = { c: d.c || [], p: d.p || [] };
+    const yeni = S.ref.c.length + S.ref.p.length;
+    renderPicker();
+    if (eski && yeni !== eski) note(`Rehber güncellendi — ${S.ref.c.length} müşteri, ${S.ref.p.length} proje`);
+  } catch(e){}
+}
+loadRef(true);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadRef(false); });
+window.addEventListener('focus', () => loadRef(false));
+setInterval(() => { if (!document.hidden) loadRef(false); }, 3600000);
 
 (async function boot(){
   const cfg = window.IZO_FIREBASE || {};
