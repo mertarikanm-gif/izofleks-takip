@@ -6,6 +6,7 @@
 */
 "use strict";
 
+const APP_VERSION = "2026.09.18";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -516,11 +517,15 @@ function openSheet(){
   sheetTitle.textContent = 'Senkron';
   if (!S.cloudReady){
     sheetBody.innerHTML = `<p class="lead">Şu an <b>yerel mod</b>: veriler yalnızca bu cihazda saklanıyor.</p>
-      <p class="lead">Telefon ve bilgisayar arasında senkron için <code>firebase-config.js</code> dosyasına Firebase ayarlarını yapıştırın (kurulum adımları README dosyasında).</p>
-      <div class="row"><button class="btn" data-act="close-sheet">Tamam</button></div>`;
+      <p class="lead">Telefon ve bilgisayar arasında senkron için <code>firebase-config.js</code> dosyasına Firebase ayarlarını yapıştırın (kurulum adımları KURULUM.md dosyasında).</p>
+      <p class="who">sürüm ${APP_VERSION}</p>
+      <div class="row"><button class="btn" data-act="refresh">Güncellemeyi denetle</button>
+      <button class="btn primary" data-act="close-sheet">Tamam</button></div>`;
   } else if (S.user){
-    sheetBody.innerHTML = `<p class="lead">Bulut senkronu açık. Aynı hesapla girdiğiniz her cihazda aynı liste görünür.</p>
+    sheetBody.innerHTML = `<p class="lead">Bulut senkronu açık. Aynı hesapla girdiğiniz her cihazda aynı liste görünür — değişiklikler anında yansır, yenilemeye gerek yok.</p>
       <p class="who">${esc(S.user.email || S.user.uid)}</p>
+      <p class="who">sürüm ${APP_VERSION} · ${(S.ref.c || []).length} müşteri · ${(S.ref.p || []).length} proje</p>
+      <div class="row"><button class="btn" data-act="refresh">Güncellemeyi denetle</button></div>
       <div class="row"><button class="btn" data-act="signout">Çıkış yap</button>
       <button class="btn primary" data-act="close-sheet">Kapat</button></div>`;
   } else {
@@ -588,6 +593,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'install'){ doInstall(); return; }
   if (a === 'account'){ openSheet(); return; }
   if (a === 'close-sheet'){ closeSheet(); return; }
+  if (a === 'refresh'){ closeSheet(); hardRefresh(); return; }
 
   if (a === 'signin' || a === 'signup'){
     const mail = (document.getElementById('a-mail')?.value || '').trim();
@@ -774,9 +780,54 @@ const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
 const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
 if (isIOS && !standalone) installBtn.hidden = false;
 
-/* ============ service worker ============ */
+/* ============ service worker + otomatik güncelleme ============ */
+let swReg = null, lastCheck = 0, updateShown = false;
+
+function showUpdateBar(){
+  if (updateShown) return;
+  updateShown = true;
+  const bar = document.createElement('div');
+  bar.className = 'updbar';
+  bar.innerHTML = '<span>Yeni sürüm hazır</span><button class="btn primary" id="upd-go">Yenile</button>';
+  document.body.appendChild(bar);
+  document.getElementById('upd-go').addEventListener('click', () => location.reload());
+}
+
+async function checkUpdate(force){
+  if (!swReg) return false;
+  const now = Date.now();
+  if (!force && now - lastCheck < 60000) return false;
+  lastCheck = now;
+  try { await swReg.update(); return true; } catch(e){ return false; }
+}
+
 if ('serviceWorker' in navigator){
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW:', e)));
+  window.addEventListener('load', async () => {
+    try {
+      swReg = await navigator.serviceWorker.register('./sw.js');
+      navigator.serviceWorker.addEventListener('controllerchange', showUpdateBar);
+      swReg.addEventListener('updatefound', () => {
+        const w = swReg.installing;
+        if (!w) return;
+        w.addEventListener('statechange', () => {
+          if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar();
+        });
+      });
+      checkUpdate(true);
+    } catch(e){ console.warn('SW:', e); }
+  });
+  // uygulamaya her dönüşte sessizce yeni sürüm var mı diye bak
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(false); });
+}
+
+async function hardRefresh(){
+  note('Güncelleme denetleniyor…');
+  const found = await checkUpdate(true);
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+  } catch(e){}
+  setTimeout(() => location.reload(), found ? 900 : 400);
 }
 
 /* ============ A42 arayüzü ============ */
