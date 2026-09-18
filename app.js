@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.18f";
+const APP_VERSION = "2026.09.18g";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -204,6 +204,10 @@ const ICON_LIST = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"
   <rect x="8" y="9.25" width="8.5" height="1.5" rx=".75"/>
   <rect x="8" y="13.75" width="8.5" height="1.5" rx=".75"/></svg>`;
 
+const ICON_COPY = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5">
+  <rect x="7" y="7" width="8.5" height="8.5" rx="2"/>
+  <path d="M12.5 4.5H6a1.5 1.5 0 0 0-1.5 1.5v6.5"/></svg>`;
+
 /* ============ parçalar ============ */
 function taskHtml(t, o = {}){
   const j = jobById(t.jobId);
@@ -215,6 +219,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : `<span class="jl">${esc(jobLabel(j))}</span>`}<span class="tt">${esc(t.text)}${meta}</span></span>
+    <button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button>
     <button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button>
   </div>`;
 }
@@ -314,6 +319,7 @@ function jobsView(){
       <div class="job-h"><span class="swatch" style="background:${jobColor(j)}"></span>
         <span class="nm"><span class="cust">${esc(j.customer || '—')}</span><div class="proj">${esc(j.project || 'İsimsiz proje')}</div></span>
         <span class="acts">
+          <button class="btn ghost ico" data-act="dup-job" data-id="${j.id}" title="İşi çoğalt" aria-label="İşi çoğalt">${ICON_COPY}</button>
           <button class="btn ghost" data-act="arch-job" data-id="${j.id}" title="${j.archived ? 'Arşivden çıkar' : 'Arşivle'}">${j.archived ? '↺' : '⌁'}</button>
           <button class="btn ghost" data-act="del-job" data-id="${j.id}" title="Sil">×</button></span></div>
       <div class="job-stat"><span><b>${open}</b> açık</span><span><b>${done}</b> biten</span></div>
@@ -693,6 +699,29 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (a === 'to-today'){ S.store.update('tasks', id, { day: todayIso() }); return; }
+  if (a === 'dup-task'){
+    const t = S.tasks.find(x => x.id === id);
+    if (!t) return;
+    const ayni = S.tasks.filter(x => (x.day || '') === (t.day || '')).sort(byDone);
+    const i = ayni.findIndex(x => x.id === id);
+    S.store.add('tasks', { jobId: t.jobId, day: t.day || '', text: t.text,
+      done: false, createdAt: Date.now(), ord: ordBetween(ayni[i], ayni[i + 1]) });
+    note('Görev çoğaltıldı.');
+    return;
+  }
+  if (a === 'dup-job'){
+    const j = jobById(id);
+    if (!j) return;
+    const yeni = await S.store.add('jobs', { customer: j.customer || '', project: (j.project || '') + ' (kopya)',
+      archived: false, ci: S.jobs.length % SWATCH.length, createdAt: Date.now() });
+    const acik = S.tasks.filter(t => t.jobId === id && !t.done).sort(byDone);
+    for (const t of acik){
+      await S.store.add('tasks', { jobId: yeni, day: t.day || '', text: t.text,
+        done: false, createdAt: Date.now(), ord: ordOf(t) });
+    }
+    note(acik.length ? `İş ve ${acik.length} açık görev çoğaltıldı.` : 'İş çoğaltıldı.');
+    return;
+  }
   if (a === 'del-task'){ if (confirm('Bu görev silinsin mi?')) S.store.remove('tasks', id); return; }
   if (a === 'arch-job'){ const j = jobById(id); if (j) S.store.update('jobs', id, { archived: !j.archived }); return; }
   if (a === 'del-job'){
