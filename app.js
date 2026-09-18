@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.18b";
+const APP_VERSION = "2026.09.18c";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -149,11 +149,15 @@ function customerList(){
     else map.set(k, { name, contactId: null, n, last, src: 'ref', jobs: 0 });
   });
   const byName = (a, b) => a.name.localeCompare(b.name, 'tr');
+  const byFresh = (a, b) => (b.last || '').localeCompare(a.last || '') || b.n - a.n || byName(a, b);
+  const GUNCEL = String(new Date().getFullYear() - 1);   // son iki yıl
   const all = [...map.values()];
+  const ref = all.filter(x => x.src === 'ref');
   return {
     job:     all.filter(x => x.src === 'job').sort((a, b) => b.jobs - a.jobs || byName(a, b)),
     contact: all.filter(x => x.src === 'contact').sort(byName),
-    ref:     all.filter(x => x.src === 'ref').sort(byName),
+    fresh:   ref.filter(x => (x.last || '') >= GUNCEL).sort(byFresh),
+    ref:     ref.filter(x => (x.last || '') <  GUNCEL).sort(byFresh),
     all
   };
 }
@@ -371,6 +375,7 @@ function renderPicker(){
     const f = a => a.filter(c => hit(c.name));
     body = block('Devam eden işler', f(L.job), row, CAP)
          + block('Rehber', f(L.contact), row, CAP)
+         + block('Güncel müşteriler', f(L.fresh), row, CAP)
          + block('Teklif arşivi', f(L.ref), row, CAP);
     if (!body) body = '<div class="pop-empty">Kayıt yok.</div>';
     if (q.trim() && !L.all.some(c => norm(c.name) === norm(q))) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” rehbere ekle</button>`;
