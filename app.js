@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.18e";
+const APP_VERSION = "2026.09.18f";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
