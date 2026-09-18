@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.18d";
+const APP_VERSION = "2026.09.18e";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -113,7 +113,8 @@ const activeJobs = () => S.jobs.filter(j => !j.archived);
 const jobById = id => S.jobs.find(j => j.id === id) || null;
 const jobColor = j => j ? SWATCH[(j.ci || 0) % SWATCH.length] : 'var(--line-2)';
 const jobLabel = j => j ? ((j.customer ? j.customer + ' · ' : '') + (j.project || '')) : 'GENEL';
-const byDone = (a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) || (a.createdAt || 0) - (b.createdAt || 0);
+const ordOf = t => (typeof t.ord === 'number' ? t.ord : (t.createdAt || 0));
+const byDone = (a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) || ordOf(a) - ordOf(b);
 
 const tasksOfDay = d => S.tasks.filter(t => t.day === d && (S.showDone || !t.done)).sort(byDone);
 const undatedTasks = () => S.tasks.filter(t => !t.day && (S.showDone || !t.done)).sort(byDone);
@@ -208,8 +209,8 @@ function taskHtml(t, o = {}){
   const j = jobById(t.jobId);
   const late = !t.done && t.day && t.day < todayIso();
   const meta = o.showDay ? `<span class="dbadge">${t.day ? esc(shortDate(t.day)) : 'tarihsiz'}</span>` : '';
-  return `<div class="task${t.done ? ' done' : ''}${late ? ' late' : ''}">
-    <span class="stripe" style="background:${jobColor(j)}"></span>
+  return `<div class="task${t.done ? ' done' : ''}${late ? ' late' : ''}" data-id="${t.id}">
+    <span class="stripe" style="background:${jobColor(j)}" data-drag="${t.id}" title="Sürükle" aria-hidden="true"></span>
     <button class="box" data-act="toggle" data-id="${t.id}" aria-label="Tamamlandı işaretle" aria-pressed="${t.done ? 'true' : 'false'}">
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -264,7 +265,7 @@ function weekView(){
     const composing = S.composer && S.composer.scope === 'week' && S.composer.day === di;
     h += `<section class="day${i > 4 ? ' weekend' : ''}${di === t0 ? ' today' : ''}">
       <div class="day-h"><span class="dn">${DAY_FULL[i]}</span><span class="dd">${pad(d.getDate())}.${pad(d.getMonth() + 1)}</span>${open ? `<span class="cnt">${open}</span>` : ''}</div>
-      <div class="day-b">${list.map(t => taskHtml(t)).join('')}${composing ? composerHtml('week') : ''}</div>
+      <div class="day-b" data-drop="${di}">${list.map(t => taskHtml(t)).join('')}${composing ? composerHtml('week') : ''}</div>
       <div class="day-f">${composing ? '' : `<button class="addlink" data-act="open-composer" data-scope="week" data-day="${di}">+ görev</button>`}</div>
     </section>`;
   }
@@ -274,7 +275,7 @@ function weekView(){
   const composingU = S.composer && S.composer.scope === 'week' && S.composer.day === '';
   h += `<div class="band"><div class="band-h"><h3>Tarihsiz</h3><span class="rule"></span>
     <button class="btn ghost" data-act="open-composer" data-scope="week" data-day="">+ ekle</button></div>
-    <div class="chips">${und.length ? und.map(t => taskHtml(t)).join('') : '<div class="empty-note">Tarihe bağlı olmayan görev yok.</div>'}
+    <div class="chips" data-drop="">${und.length ? und.map(t => taskHtml(t)).join('') : '<div class="empty-note">Tarihe bağlı olmayan görev yok.</div>'}
     ${composingU ? `<div style="min-width:240px;flex:1 1 240px">${composerHtml('week')}</div>` : ''}</div></div>`;
   return h;
 }
@@ -439,6 +440,76 @@ function pickerChoose(val, cust){
   document.getElementById('j-proj')?.focus();
 }
 
+/* ============ yazarken öneri ============ */
+let sg = null;   // { input, items, i }
+
+function sgList(id, q){
+  const t = norm(q);
+  if (!t) return [];
+  const pre = [], inc = [];
+  const push = (name, sub, cust) => {
+    const n = norm(name);
+    if (n === t) return;
+    if (n.startsWith(t)) pre.push({ name, sub, cust });
+    else if (n.includes(t)) inc.push({ name, sub, cust });
+  };
+  if (id === 'j-cust'){
+    const L = customerList();
+    [...L.job, ...L.contact, ...L.fresh, ...L.ref].forEach(c =>
+      push(c.name, [c.jobs ? c.jobs + ' açık iş' : '', c.n ? c.n + ' teklif' : '', c.last].filter(Boolean).join(' · ')));
+  } else {
+    const cust = (document.getElementById('j-cust')?.value || '').trim();
+    const L = projectList(cust);
+    const dar = !!cust;
+    const kay = dar ? [...L.live.filter(p => p.same), ...L.mine] : [...L.live, ...L.mine, ...L.other];
+    kay.forEach(p => push(p.name, [p.customer && norm(p.customer) !== norm(cust) ? p.customer : '', p.kind, p.year].filter(Boolean).join(' · '), p.customer));
+  }
+  return [...pre, ...inc].slice(0, 8);
+}
+
+function sgClose(){ sg = null; document.getElementById('sg')?.remove(); }
+
+function sgShow(input){
+  const items = sgList(input.id, input.value);
+  sgClose();
+  if (!items.length) return;
+  sg = { input, items, i: -1 };
+  const box = document.createElement('div');
+  box.id = 'sg'; box.className = 'sg';
+  box.innerHTML = items.map((it, k) =>
+    `<button class="sg-row" data-k="${k}"><span class="sg-nm">${esc(it.name)}</span>${
+      it.sub ? `<span class="sg-sub">${esc(it.sub)}</span>` : ''}</button>`).join('');
+  document.body.appendChild(box);
+  const r = input.getBoundingClientRect();
+  box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.offsetWidth - 8)) + 'px';
+  box.style.width = Math.min(r.width, window.innerWidth - 16) + 'px';
+  const alt = r.bottom + 4;
+  box.style.top = (alt + box.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - 4 - box.offsetHeight) : alt) + 'px';
+  box.addEventListener('mousedown', e => e.preventDefault());
+  box.addEventListener('click', e => {
+    const b = e.target.closest('.sg-row');
+    if (b) sgPick(+b.dataset.k);
+  });
+}
+
+function sgMark(){
+  document.querySelectorAll('#sg .sg-row').forEach((n, k) => n.classList.toggle('on', k === sg.i));
+}
+
+function sgPick(k){
+  if (!sg || !sg.items[k]) return;
+  const it = sg.items[k], input = sg.input;
+  input.value = it.name;
+  if (input.id === 'j-cust') S.newJob.customer = it.name;
+  else {
+    S.newJob.project = it.name;
+    const ce = document.getElementById('j-cust');
+    if (it.cust && ce && !ce.value.trim()){ ce.value = it.cust; S.newJob.customer = it.cust; }
+  }
+  sgClose();
+  (input.id === 'j-cust' ? document.getElementById('j-proj') : input)?.focus();
+}
+
 /* ============ render ============ */
 function render(){
   document.getElementById('tab-week').setAttribute('aria-selected', S.tab === 'week');
@@ -597,7 +668,7 @@ document.addEventListener('click', async (e) => {
     pickerChoose(v);
     return;
   }
-  if (a === 'save-job'){ saveJob(); return; }
+  if (a === 'save-job'){ sgClose(); saveJob(); return; }
   if (a === 'seed'){ seed(); return; }
   if (a === 'install'){ doInstall(); return; }
   if (a === 'account'){ openSheet(); return; }
@@ -674,9 +745,13 @@ sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
 
 document.addEventListener('input', e => {
   if (e.target.id === 'c-text') S.draft.text = e.target.value;
-  if (e.target.id === 'j-cust') S.newJob.customer = e.target.value;
-  if (e.target.id === 'j-proj') S.newJob.project = e.target.value;
+  if (e.target.id === 'j-cust'){ S.newJob.customer = e.target.value; sgShow(e.target); }
+  if (e.target.id === 'j-proj'){ S.newJob.project = e.target.value; sgShow(e.target); }
   if (e.target.id === 'pop-q' && S.picker){ S.picker.q = e.target.value; renderPicker(); }
+});
+
+document.addEventListener('focusout', e => {
+  if (e.target.id === 'j-cust' || e.target.id === 'j-proj') setTimeout(sgClose, 120);
 });
 
 document.addEventListener('mousedown', e => {
@@ -689,6 +764,14 @@ document.addEventListener('change', e => {
   if (e.target.id === 'c-day') S.draft.day = e.target.value;
 });
 document.addEventListener('keydown', e => {
+  // yazarken öneri listesinde gezinme
+  if (sg && (e.target.id === 'j-cust' || e.target.id === 'j-proj')){
+    if (e.key === 'ArrowDown'){ e.preventDefault(); sg.i = (sg.i + 1) % sg.items.length; sgMark(); return; }
+    if (e.key === 'ArrowUp'){ e.preventDefault(); sg.i = (sg.i - 1 + sg.items.length) % sg.items.length; sgMark(); return; }
+    if (e.key === 'Enter' && sg.i >= 0){ e.preventDefault(); sgPick(sg.i); return; }
+    if (e.key === 'Escape'){ e.preventDefault(); sgClose(); return; }
+    if (e.key === 'Tab'){ if (sg.i >= 0){ e.preventDefault(); sgPick(sg.i); } else sgClose(); return; }
+  }
   if (e.key === 'Escape'){
     if (S.picker){ closePicker(); return; }
     if (!sheet.hidden){ closeSheet(); return; }
@@ -807,6 +890,95 @@ async function doInstall(){
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
 const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
 if (isIOS && !standalone) installBtn.hidden = false;
+
+/* ============ sürükle-bırak ============ */
+let drag = null;
+
+function ordBetween(prev, next){
+  const a = prev ? ordOf(prev) : null, b = next ? ordOf(next) : null;
+  if (a === null && b === null) return Date.now();
+  if (a === null) return b - 60000;
+  if (b === null) return a + 60000;
+  return (a + b) / 2;
+}
+
+function dropIndicator(box, y){
+  document.querySelectorAll('.dropline').forEach(n => n.remove());
+  const line = document.createElement('div');
+  line.className = 'dropline';
+  const kids = [...box.querySelectorAll('.task')].filter(n => n !== drag.el);
+  let before = null;
+  for (const k of kids){
+    const r = k.getBoundingClientRect();
+    if (y < r.top + r.height / 2){ before = k; break; }
+  }
+  box.insertBefore(line, before);
+  drag.box = box; drag.before = before;
+}
+
+document.addEventListener('pointerdown', e => {
+  const h = e.target.closest('[data-drag]');
+  if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const el = h.closest('.task');
+  const id = h.dataset.drag;
+  if (!el || !id) return;
+  e.preventDefault();
+  const r = el.getBoundingClientRect();
+  drag = { id, el, h, x0: e.clientX, y0: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top,
+           w: r.width, on: false, ghost: null, box: null, before: null };
+  try { h.setPointerCapture(e.pointerId); } catch(err){}
+});
+
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.on){
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;
+    drag.on = true;
+    const g = drag.el.cloneNode(true);
+    g.className = 'task dragghost';
+    g.style.width = drag.w + 'px';
+    document.body.appendChild(g);
+    drag.ghost = g;
+    drag.el.classList.add('dragsrc');
+    document.body.classList.add('dragging');
+  }
+  drag.ghost.style.left = (e.clientX - drag.dx) + 'px';
+  drag.ghost.style.top  = (e.clientY - drag.dy) + 'px';
+  drag.ghost.hidden = true;
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  drag.ghost.hidden = false;
+  const box = under && under.closest('[data-drop]');
+  document.querySelectorAll('[data-drop].dropon').forEach(n => n.classList.remove('dropon'));
+  if (box){ box.classList.add('dropon'); dropIndicator(box, e.clientY); }
+  else { document.querySelectorAll('.dropline').forEach(n => n.remove()); drag.box = null; }
+});
+
+function endDrag(apply){
+  if (!drag) return;
+  const d = drag; drag = null;
+  d.ghost?.remove();
+  d.el.classList.remove('dragsrc');
+  document.body.classList.remove('dragging');
+  document.querySelectorAll('.dropline').forEach(n => n.remove());
+  document.querySelectorAll('[data-drop].dropon').forEach(n => n.classList.remove('dropon'));
+  if (!apply || !d.on || !d.box) return;
+
+  const gun = d.box.dataset.drop;
+  const t = S.tasks.find(x => x.id === d.id);
+  if (!t) return;
+  const komsular = S.tasks
+    .filter(x => (x.day || '') === gun && x.id !== d.id && (S.showDone || !x.done))
+    .sort(byDone);
+  const beforeId = d.before?.dataset.id || null;
+  const i = beforeId ? komsular.findIndex(x => x.id === beforeId) : komsular.length;
+  const yer = i < 0 ? komsular.length : i;
+  const yeniOrd = ordBetween(komsular[yer - 1], komsular[yer]);
+  if ((t.day || '') === gun && Math.abs(ordOf(t) - yeniOrd) < 1) return;
+  S.store.update('tasks', d.id, { day: gun, ord: yeniOrd });
+}
+
+document.addEventListener('pointerup', () => endDrag(true));
+document.addEventListener('pointercancel', () => endDrag(false));
 
 /* ============ service worker + otomatik güncelleme ============ */
 let swReg = null, lastCheck = 0, updateShown = false;
