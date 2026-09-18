@@ -122,32 +122,61 @@ const norm = s => String(s || '').trim().toLocaleLowerCase('tr');
 
 const KIND = { O: 'Ofis bölme', K: 'Kapı kasası', S: 'Süpürgelik' };
 
+/* Sıralama: 1) devam eden işler  2) elle eklenen rehber  3) teklif arşivi */
 function customerList(){
-  const map = new Map();   // normalize -> { name, contactId, n, last }
-  S.contacts.forEach(c => { if (c.name && !map.has(norm(c.name))) map.set(norm(c.name), { name: c.name, contactId: c.id, n: 0, last: '' }); });
-  S.jobs.forEach(j => { if (j.customer && !map.has(norm(j.customer))) map.set(norm(j.customer), { name: j.customer, contactId: null, n: 0, last: '' }); });
-  // teklif arşivi
+  const map = new Map();   // normalize -> { name, contactId, n, last, src }
+  S.jobs.forEach(j => {
+    if (!j.customer || j.archived) return;
+    const k = norm(j.customer);
+    if (!map.has(k)) map.set(k, { name: j.customer, contactId: null, n: 0, last: '', src: 'job', jobs: 0 });
+    map.get(k).jobs++;
+  });
+  S.contacts.forEach(c => {
+    if (!c.name) return;
+    const k = norm(c.name);
+    if (map.has(k)) map.get(k).contactId = c.id;
+    else map.set(k, { name: c.name, contactId: c.id, n: 0, last: '', src: 'contact', jobs: 0 });
+  });
+  S.jobs.forEach(j => {                       // arşivlenmiş işlerin müşterileri
+    if (!j.customer || !j.archived) return;
+    const k = norm(j.customer);
+    if (!map.has(k)) map.set(k, { name: j.customer, contactId: null, n: 0, last: '', src: 'contact', jobs: 0 });
+  });
   (S.ref.c || []).forEach(([name, n, last]) => {
     const k = norm(name);
     if (map.has(k)){ const e = map.get(k); e.n = e.n || n; e.last = e.last || last; }
-    else map.set(k, { name, contactId: null, n, last, archive: true });
+    else map.set(k, { name, contactId: null, n, last, src: 'ref', jobs: 0 });
   });
-  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  const byName = (a, b) => a.name.localeCompare(b.name, 'tr');
+  const all = [...map.values()];
+  return {
+    job:     all.filter(x => x.src === 'job').sort((a, b) => b.jobs - a.jobs || byName(a, b)),
+    contact: all.filter(x => x.src === 'contact').sort(byName),
+    ref:     all.filter(x => x.src === 'ref').sort(byName),
+    all
+  };
 }
 
 function projectList(customer){
   const cn = norm(customer);
-  const mine = new Map(), other = new Map();
-  const put = (proj, cust, kind, year) => {
-    if (!proj) return;
-    const bucket = (cn && norm(cust) === cn) ? mine : other;
+  const live = new Map(), mine = new Map(), other = new Map();
+  const seen = new Set();
+  S.jobs.forEach(j => {
+    if (!j.project || j.archived) return;
+    const k = norm(j.project);
+    if (seen.has(k)) return; seen.add(k);
+    live.set(k, { name: j.project, customer: j.customer || '', kind: '', year: '', live: true,
+                  same: cn && norm(j.customer) === cn });
+  });
+  (S.ref.p || []).forEach(([cust, proj, kind, year]) => {
     const k = norm(proj);
-    if (!bucket.has(k)) bucket.set(k, { name: proj, customer: cust || '', kind, year });
-  };
-  S.jobs.forEach(j => put(j.project, j.customer, '', ''));
-  (S.ref.p || []).forEach(([cust, proj, kind, year]) => put(proj, cust, KIND[kind] || '', year));
+    if (!proj || seen.has(k)) return; seen.add(k);
+    const rec = { name: proj, customer: cust || '', kind: KIND[kind] || '', year };
+    (cn && norm(cust) === cn ? mine : other).set(k, rec);
+  });
   const srt = m => [...m.values()].sort((a, b) => (b.year || '').localeCompare(a.year || '') || a.name.localeCompare(b.name, 'tr'));
-  return { mine: srt(mine), other: srt(other) };
+  const lv = [...live.values()].sort((a, b) => (b.same ? 1 : 0) - (a.same ? 1 : 0) || a.name.localeCompare(b.name, 'tr'));
+  return { live: lv, mine: srt(mine), other: srt(other) };
 }
 
 function ensureContact(name){
@@ -327,27 +356,34 @@ function renderPicker(){
   const more = n => n > 0 ? `<div class="pop-more">+${n} kayıt daha — aramak için yazın</div>` : '';
   let body = '', title, addable = '';
 
+  const block = (label, rows, rowFn, cap) => rows.length
+    ? `<div class="pop-grp">${label}</div>` + rows.slice(0, cap).map(rowFn).join('') + more(rows.length - cap)
+    : '';
+
   if (type === 'customer'){
-    const all = customerList();
-    const rows = all.filter(c => hit(c.name));
+    const L = customerList();
     title = 'Müşteri / Mimar';
-    body = rows.length
-      ? rows.slice(0, CAP).map(c => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(c.name)}">
-          <span class="pop-nm">${esc(c.name)}</span>${c.n ? `<span class="pop-sub">${c.n} teklif${c.last ? ' · ' + c.last : ''}</span>` : ''}</button>${
-          c.contactId ? `<button class="pop-del" data-act="pop-del" data-id="${c.contactId}" title="Rehberden sil" aria-label="Rehberden sil">×</button>` : ''
-        }</div>`).join('') + more(rows.length - CAP)
-      : '<div class="pop-empty">Kayıt yok.</div>';
-    if (q.trim() && !all.some(c => norm(c.name) === norm(q))) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” rehbere ekle</button>`;
+    const row = c => `<div class="pop-row${c.src === 'job' ? ' live' : ''}"><button class="pop-pick" data-act="pop-choose" data-val="${esc(c.name)}">
+      <span class="pop-nm">${esc(c.name)}</span>
+      <span class="pop-sub">${[c.jobs ? c.jobs + ' açık iş' : '', c.n ? c.n + ' teklif' : '', c.last].filter(Boolean).map(esc).join(' · ')}</span></button>${
+      c.contactId ? `<button class="pop-del" data-act="pop-del" data-id="${c.contactId}" title="Rehberden sil" aria-label="Rehberden sil">×</button>` : ''}</div>`;
+    const f = a => a.filter(c => hit(c.name));
+    body = block('Devam eden işler', f(L.job), row, CAP)
+         + block('Rehber', f(L.contact), row, CAP)
+         + block('Teklif arşivi', f(L.ref), row, CAP);
+    if (!body) body = '<div class="pop-empty">Kayıt yok.</div>';
+    if (q.trim() && !L.all.some(c => norm(c.name) === norm(q))) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” rehbere ekle</button>`;
   } else {
     const cust = (document.getElementById('j-cust')?.value || S.newJob.customer || '').trim();
-    const { mine, other } = projectList(cust);
-    const m = mine.filter(p => hit(p.name)), o = other.filter(p => hit(p.name) || hit(p.customer));
+    const L = projectList(cust);
     title = 'Proje';
-    const row = p => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}" data-cust="${esc(p.customer)}">
+    const row = p => `<div class="pop-row${p.live ? ' live' : ''}"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}" data-cust="${esc(p.customer)}">
       <span class="pop-nm">${esc(p.name)}</span>
-      <span class="pop-sub">${[p.customer && !cust ? p.customer : '', p.kind, p.year].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
-    if (m.length) body += `<div class="pop-grp">${esc(cust)} projeleri</div>` + m.slice(0, CAP).map(row).join('') + more(m.length - CAP);
-    if (o.length) body += `<div class="pop-grp">${m.length ? 'Diğer projeler' : 'Teklif arşivi'}</div>` + o.slice(0, CAP).map(row).join('') + more(o.length - CAP);
+      <span class="pop-sub">${[p.customer && (!cust || norm(p.customer) !== norm(cust)) ? p.customer : '', p.kind, p.year].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
+    const f = a => a.filter(p => hit(p.name) || hit(p.customer));
+    body = block('Devam eden işler', f(L.live), row, CAP)
+         + block(cust ? esc(cust) + ' · teklif arşivi' : 'Teklif arşivi', f(L.mine), row, CAP)
+         + block(L.mine.length || L.live.length ? 'Diğer teklifler' : 'Teklif arşivi', f(L.other), row, CAP);
     if (!body) body = '<div class="pop-empty">Kayıtlı proje yok.</div>';
   }
 
