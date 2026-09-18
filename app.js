@@ -79,6 +79,7 @@ const S = {
   tab: 'week',
   weekStart: mondayOf(new Date()),
   jobs: [], tasks: [], contacts: [],
+  ref: { c: [], p: [] },   // teklif arşivinden gelen müşteri/proje rehberi (rehber.json)
   showDone: false,
   showArchived: false,
   composer: null,
@@ -119,22 +120,33 @@ const lateTasks = () => { const t0 = todayIso(); return S.tasks.filter(t => !t.d
 /* --- rehber: müşteri/mimar ve proje adları --- */
 const norm = s => String(s || '').trim().toLocaleLowerCase('tr');
 
+const KIND = { O: 'Ofis bölme', K: 'Kapı kasası', S: 'Süpürgelik' };
+
 function customerList(){
-  const map = new Map();   // normalize -> { name, contactId }
-  S.contacts.forEach(c => { if (c.name && !map.has(norm(c.name))) map.set(norm(c.name), { name: c.name, contactId: c.id }); });
-  S.jobs.forEach(j => { if (j.customer && !map.has(norm(j.customer))) map.set(norm(j.customer), { name: j.customer, contactId: null }); });
+  const map = new Map();   // normalize -> { name, contactId, n, last }
+  S.contacts.forEach(c => { if (c.name && !map.has(norm(c.name))) map.set(norm(c.name), { name: c.name, contactId: c.id, n: 0, last: '' }); });
+  S.jobs.forEach(j => { if (j.customer && !map.has(norm(j.customer))) map.set(norm(j.customer), { name: j.customer, contactId: null, n: 0, last: '' }); });
+  // teklif arşivi
+  (S.ref.c || []).forEach(([name, n, last]) => {
+    const k = norm(name);
+    if (map.has(k)){ const e = map.get(k); e.n = e.n || n; e.last = e.last || last; }
+    else map.set(k, { name, contactId: null, n, last, archive: true });
+  });
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
 }
 
 function projectList(customer){
   const cn = norm(customer);
   const mine = new Map(), other = new Map();
-  S.jobs.forEach(j => {
-    if (!j.project) return;
-    const bucket = (cn && norm(j.customer) === cn) ? mine : other;
-    if (!bucket.has(norm(j.project))) bucket.set(norm(j.project), { name: j.project, customer: j.customer || '' });
-  });
-  const srt = m => [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  const put = (proj, cust, kind, year) => {
+    if (!proj) return;
+    const bucket = (cn && norm(cust) === cn) ? mine : other;
+    const k = norm(proj);
+    if (!bucket.has(k)) bucket.set(k, { name: proj, customer: cust || '', kind, year });
+  };
+  S.jobs.forEach(j => put(j.project, j.customer, '', ''));
+  (S.ref.p || []).forEach(([cust, proj, kind, year]) => put(proj, cust, KIND[kind] || '', year));
+  const srt = m => [...m.values()].sort((a, b) => (b.year || '').localeCompare(a.year || '') || a.name.localeCompare(b.name, 'tr'));
   return { mine: srt(mine), other: srt(other) };
 }
 
@@ -311,27 +323,31 @@ function renderPicker(){
 
   const { type, q } = S.picker;
   const hit = n => !q.trim() || norm(n).includes(norm(q));
+  const CAP = 50;
+  const more = n => n > 0 ? `<div class="pop-more">+${n} kayıt daha — aramak için yazın</div>` : '';
   let body = '', title, addable = '';
 
   if (type === 'customer'){
-    const rows = customerList().filter(c => hit(c.name));
+    const all = customerList();
+    const rows = all.filter(c => hit(c.name));
     title = 'Müşteri / Mimar';
     body = rows.length
-      ? rows.map(c => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(c.name)}">${esc(c.name)}</button>${
+      ? rows.slice(0, CAP).map(c => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(c.name)}">
+          <span class="pop-nm">${esc(c.name)}</span>${c.n ? `<span class="pop-sub">${c.n} teklif${c.last ? ' · ' + c.last : ''}</span>` : ''}</button>${
           c.contactId ? `<button class="pop-del" data-act="pop-del" data-id="${c.contactId}" title="Rehberden sil" aria-label="Rehberden sil">×</button>` : ''
-        }</div>`).join('')
+        }</div>`).join('') + more(rows.length - CAP)
       : '<div class="pop-empty">Kayıt yok.</div>';
-    const exact = customerList().some(c => norm(c.name) === norm(q));
-    if (q.trim() && !exact) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” rehbere ekle</button>`;
+    if (q.trim() && !all.some(c => norm(c.name) === norm(q))) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” rehbere ekle</button>`;
   } else {
     const cust = (document.getElementById('j-cust')?.value || S.newJob.customer || '').trim();
     const { mine, other } = projectList(cust);
-    const m = mine.filter(p => hit(p.name)), o = other.filter(p => hit(p.name));
+    const m = mine.filter(p => hit(p.name)), o = other.filter(p => hit(p.name) || hit(p.customer));
     title = 'Proje';
-    const row = p => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}">${esc(p.name)}${
-      p.customer && !cust ? `<span class="pop-sub">${esc(p.customer)}</span>` : ''}</button></div>`;
-    if (m.length) body += `<div class="pop-grp">${esc(cust)} projeleri</div>` + m.map(row).join('');
-    if (o.length) body += `<div class="pop-grp">${m.length ? 'Diğer projeler' : 'Tüm projeler'}</div>` + o.map(row).join('');
+    const row = p => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}" data-cust="${esc(p.customer)}">
+      <span class="pop-nm">${esc(p.name)}</span>
+      <span class="pop-sub">${[p.customer && !cust ? p.customer : '', p.kind, p.year].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
+    if (m.length) body += `<div class="pop-grp">${esc(cust)} projeleri</div>` + m.slice(0, CAP).map(row).join('') + more(m.length - CAP);
+    if (o.length) body += `<div class="pop-grp">${m.length ? 'Diğer projeler' : 'Teklif arşivi'}</div>` + o.slice(0, CAP).map(row).join('') + more(o.length - CAP);
     if (!body) body = '<div class="pop-empty">Kayıtlı proje yok.</div>';
   }
 
@@ -363,15 +379,19 @@ function renderPicker(){
   try { qi.setSelectionRange(qi.value.length, qi.value.length); } catch(e){}
 }
 
-function pickerChoose(val){
+function pickerChoose(val, cust){
   const type = S.picker.type;
   const id = type === 'customer' ? 'j-cust' : 'j-proj';
   const el = document.getElementById(id);
   if (el) el.value = val;
   if (type === 'customer') S.newJob.customer = val; else S.newJob.project = val;
+  // arşivden proje seçildiyse ve müşteri boşsa, müşteriyi de doldur
+  if (type === 'project' && cust){
+    const ce = document.getElementById('j-cust');
+    if (ce && !ce.value.trim()){ ce.value = cust; S.newJob.customer = cust; }
+  }
   closePicker();
-  // müşteri seçildiyse sıradaki alan proje
-  document.getElementById(type === 'customer' ? 'j-proj' : 'j-proj')?.focus();
+  document.getElementById('j-proj')?.focus();
 }
 
 /* ============ render ============ */
@@ -514,7 +534,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'open-job-form'){ S.tab = 'jobs'; S.composer = { scope: 'newjob', day: '' }; S.newJob = { customer: '', project: '' }; render(); return; }
   if (a === 'pick'){ openPicker(b.dataset.type, b); return; }
   if (a === 'pop-close'){ closePicker(); return; }
-  if (a === 'pop-choose'){ pickerChoose(b.dataset.val); return; }
+  if (a === 'pop-choose'){ pickerChoose(b.dataset.val, b.dataset.cust); return; }
   if (a === 'pop-del'){
     const c = S.contacts.find(x => x.id === id);
     if (c && confirm(`“${c.name}” rehberden silinsin mi? (İşler etkilenmez)`)) S.store.remove('contacts', id);
@@ -628,7 +648,7 @@ document.addEventListener('keydown', e => {
   if (e.target.id === 'pop-q'){
     e.preventDefault();
     const first = document.querySelector('#pop .pop-pick');
-    if (first) pickerChoose(first.dataset.val);
+    if (first) pickerChoose(first.dataset.val, first.dataset.cust);
     else if (S.picker.type === 'customer'){ const v = e.target.value.trim(); if (v){ ensureContact(v); pickerChoose(v); } }
     return;
   }
@@ -656,6 +676,12 @@ try {
 } catch(e){}
 render();
 bind(localStore(), 'yerel', 'off');
+
+// teklif arşivinden üretilen müşteri/proje rehberi (statik dosya)
+fetch('./rehber.json')
+  .then(r => r.ok ? r.json() : null)
+  .then(d => { if (d && (d.c || d.p)){ S.ref = { c: d.c || [], p: d.p || [] }; renderPicker(); } })
+  .catch(() => {});
 
 (async function boot(){
   const cfg = window.IZO_FIREBASE || {};
