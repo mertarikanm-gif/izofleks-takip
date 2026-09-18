@@ -2,7 +2,7 @@
    Uygulama kabuğunu önbelleğe alır: internet yokken de açılır.
    Veri senkronu Firestore'un kendi çevrimdışı önbelleğiyle çalışır. */
 
-const CACHE = 'izo-takip-v2';
+const CACHE = 'izo-takip-v3';
 const SHELL = [
   './',
   './index.html',
@@ -49,14 +49,13 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Diğer yerel dosyalar: önbellekten ver, arkada tazele
+  // Diğer yerel dosyalar: önce ağ (her zaman güncel sürüm), internet yoksa önbellek
   e.respondWith(
-    caches.match(req).then(cached => {
-      const net = fetch(req).then(res => {
+    fetch(req)
+      .then(res => {
         if (res && res.status === 200){ const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;
-      }).catch(() => cached);
-      return cached || net;
-    })
+      })
+      .catch(() => caches.match(req))
   );
 });
