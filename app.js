@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19v";
+const APP_VERSION = "2026.09.19w";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -108,6 +108,7 @@ const sheetBody = document.getElementById('sheet-body');
 const sheetTitle = document.getElementById('sheet-title');
 
 function note(msg){
+  document.querySelectorAll('.toast').forEach(n => n.remove());
   const t = document.createElement('div');
   t.className = 'toast'; t.textContent = msg;
   document.body.appendChild(t);
@@ -822,27 +823,62 @@ function tarihTablosu(b){
   return L.join('\n');
 }
 
+/* Modelin hedef görevi seçebilmesi için açık görev listesi */
+function aiGorevListesi(){
+  const t0 = todayIso();
+  const L = S.tasks
+    .filter(t => !t.done || t.day === t0)
+    .sort((a, b) => (a.day || '9999').localeCompare(b.day || '9999') || (a.createdAt || 0) - (b.createdAt || 0))
+    .slice(0, 80);
+  return L.map(t => {
+    const j = jobById(t.jobId);
+    const ne = t.pin ? 'sabit' : (t.day || 'tarihsiz');
+    return t.id + ' | ' + ne + ' | ' + (j ? jobLabel(j) : '—') + ' | ' + (t.text || '') + (t.done ? ' | BİTTİ' : '');
+  });
+}
+
 async function komutCoz(metin){
   vSet('Komut çözülüyor…', metin);
   { const a = document.getElementById('v-acts');
     if (a) a.innerHTML = '<button class="btn" data-act="voice-close">Vazgeç</button>'; }
   const bugun = new Date();
   const isler = aiIsListesi();
+  const gorevler = aiGorevListesi();
   const sistem = [
     'Bir Türk alüminyum doğrama firmasının iş takip uygulaması için sesli komutları JSON\'a çeviriyorsun.',
     tarihTablosu(bugun),
-    'İŞ LİSTESİ (id | müşteri | proje):',
+    'İŞ LİSTESİ (isId | müşteri | proje):',
     isler.map(x => x.id + ' | ' + x.m + ' | ' + x.p).join('\n'),
     '',
+    'MEVCUT GÖREVLER (gorevId | gün | iş | metin):',
+    (gorevler.length ? gorevler.join('\n') : '(görev yok)'),
+    '',
     'SADECE şu şemada geçerli JSON döndür, başka hiçbir şey yazma:',
-    '{"islem":"gorev-ekle"|"anlasilmadi","isId":string|null,"isAd":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,"metin":string|null,"guven":0..1,"soru":string|null}',
-    '- isId: listeden EN İYİ eşleşen id. Eşleşme yoksa null ve guven düşük olsun.',
-    '- Müşteri sütunu GENEL olanlar projeden bağımsız başlıklardır. Komutta hiçbir mimar/proje geçmiyorsa (fatura, muhasebe, vergi, SGK, ofis işi, tedarikçi arama, kişisel hatırlatma gibi) bunlardan uygun olanı seç ve guven yüksek olsun — proje uydurma.',
-    '- gun: tarih anlaşılmadıysa null (görev tarihsiz eklenir).',
-    '- sabit: kullanıcı "sabit", "sabitle", "sabit olsun", "pinle" derse true — görev takvime girmez, sabit panelinde durur. gun de null olur. Diğer durumlarda false.',
-    '- metin: yapılacak işin kısa açıklaması, Türkçe, komut kalıbı olmadan (örn. "boya yapılacak").',
-    '- guven: iş eşleşmesi + tarih birlikte ne kadar kesinse. Emin değilsen 0.7 altında ver.',
-    '- soru: guven düşükse kullanıcıya sorulacak tek cümlelik soru, değilse null.'
+    '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"anlasilmadi",',
+    ' "isId":string|null,"gorevId":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,',
+    ' "metin":string|null,"guven":0..1,"soru":string|null}',
+    '',
+    'İŞLEMLER:',
+    '- ekle: yeni görev. isId + metin zorunlu, gun/sabit isteğe bağlı.',
+    '- tasi: var olan görevin gününü değiştir ("cumaya al", "yarına kaydır", "tarihsize at" → gun null). gorevId + gun.',
+    '- sil: görevi kaldır ("sil", "kaldır", "iptal et"). gorevId.',
+    '- bitti: görevi tamamlandı işaretle ("bitti", "tamamlandı", "yapıldı"). gorevId.',
+    '- geri-al: tamamlanmış görevi tekrar aç ("geri al", "bitmedi", "aç"). gorevId.',
+    '- sabitle / sabit-kaldir: görevi sabit panele al / oradan çıkar. gorevId.',
+    '- duzenle: görev metnini değiştir. metin = YENİ TAM METİN.',
+    '    "şunu da ekle / notunu ekle" → eski metni aynen koru, sonuna ", <yeni>" ekleyip tam metni yaz.',
+    '    "şunu çıkar" → o kısmı ayıklayıp kalan tam metni yaz.',
+    '- anlasilmadi: emin değilsen. soru alanını doldur.',
+    '',
+    'KURALLAR:',
+    '- isId: İŞ LİSTESİ’nden EN İYİ eşleşen id; eşleşme yoksa null ve guven düşük.',
+    '- gorevId: MEVCUT GÖREVLER listesinden EN İYİ eşleşen id. Birden fazla görev aynı derecede uyuyorsa "anlasilmadi" dön ve soru ile hangisi olduğunu sor — rastgele seçme.',
+    '- Müşteri sütunu GENEL olanlar projeden bağımsız başlıklardır. Komutta mimar/proje geçmiyorsa (fatura, muhasebe, vergi, SGK, ofis işi, tedarikçi, kişisel hatırlatma) bunlardan uygun olanı seç — proje uydurma.',
+    '- gun: tarih anlaşılmadıysa null.',
+    '- sabit: "sabit", "sabitle", "pinle" geçiyorsa true; görev takvime girmez, gun null olur.',
+    '- metin: kısa Türkçe açıklama, komut kalıbı olmadan (örn. "boya yapılacak").',
+    '- guven: hedef + tarih birlikte ne kadar kesinse. Emin değilsen 0.7 altında ver.',
+    '- soru: guven düşükse tek cümlelik soru, değilse null.'
   ].join('\n');
 
   try {
@@ -863,9 +899,16 @@ async function komutCoz(metin){
   }
 }
 
+const ISLEM_AD = { ekle:'Ekle', tasi:'Taşı', sil:'Sil', bitti:'Bitti işaretle',
+  'geri-al':'Geri aç', sabitle:'Sabitle', 'sabit-kaldir':'Sabitten çıkar', duzenle:'Değiştir' };
+const HEDEF_ISLEM = ['tasi','sil','bitti','geri-al','sabitle','sabit-kaldir','duzenle'];
+
 function komutSonuc(o, ham){
   V.sonuc = o;
-  if (o.islem !== 'gorev-ekle' || !o.isId){
+  const islem = String(o.islem || '');
+  const gecerli = (islem === 'ekle' && o.isId && o.metin)
+               || (HEDEF_ISLEM.includes(islem) && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
+  if (!gecerli){
     vSet('Anlaşılmadı', ham);
     document.getElementById('v-body').innerHTML =
       `<p class="vq">${esc(o.soru || 'Hangi iş için, hangi güne?')}</p>`;
@@ -874,25 +917,43 @@ function komutSonuc(o, ham){
     return;
   }
   const guven = +o.guven || 0;
-  if (guven >= 0.75 && o.metin){ komutUygula(o, true); return; }
+  /* Silme asla kendiliğinden yapılmaz — her zaman onay ister. */
+  const esik = islem === 'sil' ? 2 : (islem === 'ekle' ? 0.75 : 0.8);
+  if (guven >= esik){ komutUygula(o, true); return; }
   vSet('Onay bekliyor', ham);
   document.getElementById('v-body').innerHTML = komutOzet(o) +
-    `<p class="vq">${esc(o.soru || 'Doğru mu?')}</p>`;
+    `<p class="vq">${esc(o.soru || (islem === 'sil' ? 'Bu görev silinsin mi?' : 'Doğru mu?'))}</p>`;
   document.getElementById('v-acts').innerHTML =
-    '<button class="btn primary" data-act="voice-ok">Ekle</button>' +
+    `<button class="btn primary${islem === 'sil' ? ' tehlike' : ''}" data-act="voice-ok">${esc(ISLEM_AD[islem] || 'Uygula')}</button>` +
     '<button class="btn" data-act="mic">Tekrar söyle</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
 }
 
-function komutOzet(o){
-  const ad = komutIsAdi(o);
-  const g = o.sabit ? 'sabit (takvim dışı)' : o.gun ? (DAY_FULL[(fromIso(o.gun).getDay() + 6) % 7] + ' ' + shortDate(o.gun)) : 'tarihsiz';
-  return `<div class="vsum">
-    <div><span>İş</span><b>${esc(ad)}</b></div>
-    <div><span>Gün</span><b>${esc(g)}</b></div>
-    <div><span>Not</span><b>${esc(o.metin || '')}</b></div>
-  </div>`;
+function gunEtiket(gun, sabit){
+  if (sabit) return 'sabit (takvim dışı)';
+  if (!gun) return 'tarihsiz';
+  return DAY_FULL[(fromIso(gun).getDay() + 6) % 7] + ' ' + shortDate(gun);
 }
+
+function komutOzet(o){
+  const islem = String(o.islem || '');
+  const sat = (e, v) => `<div><span>${e}</span><b>${esc(v)}</b></div>`;
+  if (islem === 'ekle'){
+    return `<div class="vsum">${sat('İş', komutIsAdi(o))}${sat('Gün', gunEtiket(o.gun, o.sabit))}${sat('Not', o.metin || '')}</div>`;
+  }
+  const t = S.tasks.find(x => x.id === o.gorevId);
+  if (!t) return '';
+  const j = jobById(t.jobId);
+  let h = `<div class="vsum">${sat('İşlem', ISLEM_AD[islem] || islem)}`
+        + sat('Görev', t.text || '')
+        + sat('İş', j ? jobLabel(j) : '—');
+  if (islem === 'tasi')    h += sat('Yeni gün', gunEtiket(o.gun, false)) + sat('Eski gün', gunEtiket(t.day, t.pin));
+  if (islem === 'duzenle') h += sat('Yeni metin', o.metin || '');
+  if (islem === 'sabitle') h += sat('Sonuç', 'sabit panele taşınır');
+  if (islem === 'sabit-kaldir') h += sat('Sonuç', 'tarihsiz listeye döner');
+  return h + '</div>';
+}
+
 function komutIsAdi(o){
   { const g = genelListe().find(x => 'job:' + x.id === String(o.isId || '')); if (g) return g.ad; }
   if (String(o.isId || '').startsWith('a42:')){
@@ -906,6 +967,9 @@ function komutIsAdi(o){
 }
 
 async function komutUygula(o, otomatik){
+  const islem = String(o.islem || 'ekle');
+  if (islem !== 'ekle') return komutHedefUygula(o, islem);
+
   const id = String(o.isId || '');
   let jobId = null;
   if (id.startsWith('a42:')){
@@ -921,7 +985,6 @@ async function komutUygula(o, otomatik){
   } else {
     jobId = id.replace(/^job:/, '');
     if (!jobById(jobId)){
-      /* henüz açılmamış hazır genel başlık olabilir */
       const g = genelListe().find(x => x.id === jobId);
       if (g){
         await S.store.setId('jobs', g.id, { customer: '', project: g.ad, genel: true,
@@ -934,13 +997,56 @@ async function komutUygula(o, otomatik){
   const gorevId = await S.store.add('tasks', { jobId, day: sabit ? '' : (o.gun || ''),
     text: o.metin || V.metin, done: false, pin: sabit, createdAt: Date.now() });
   voiceKapat();
-  const g = sabit ? 'sabit' : (o.gun ? shortDate(o.gun) : 'tarihsiz');
-  noteGeri((otomatik ? 'Eklendi' : 'Eklendi') + ' — ' + komutIsAdi(o) + ' · ' + g, () => S.store.remove('tasks', gorevId));
+  noteGeri('Eklendi — ' + komutIsAdi(o) + ' · ' + gunEtiket(o.gun, sabit),
+           () => S.store.remove('tasks', gorevId));
   render();
 }
 
+/* Var olan bir görev üzerinde işlem: taşı / sil / bitti / geri-al / sabitle / düzenle */
+async function komutHedefUygula(o, islem){
+  const t = S.tasks.find(x => x.id === o.gorevId);
+  if (!t){ vSet('Görev bulunamadı', V.metin); return; }
+  const eski = { day: t.day || '', pin: !!t.pin, done: !!t.done, text: t.text || '', ord: t.ord, jobId: t.jobId, createdAt: t.createdAt };
+  const geriYaz = () => S.store.update('tasks', t.id, { day: eski.day, pin: eski.pin, done: eski.done, text: eski.text });
+  let mesaj = '', geri = geriYaz;
+
+  if (islem === 'tasi'){
+    await S.store.update('tasks', t.id, { day: o.gun || '', pin: false });
+    mesaj = 'Taşındı — ' + gunEtiket(o.gun, false);
+  } else if (islem === 'bitti'){
+    await S.store.update('tasks', t.id, { done: true });
+    mesaj = 'Bitti — ' + kisalt(t.text);
+  } else if (islem === 'geri-al'){
+    await S.store.update('tasks', t.id, { done: false });
+    mesaj = 'Geri açıldı — ' + kisalt(t.text);
+  } else if (islem === 'sabitle'){
+    await S.store.update('tasks', t.id, { pin: true, day: '' });
+    mesaj = 'Sabitlendi — ' + kisalt(t.text);
+  } else if (islem === 'sabit-kaldir'){
+    await S.store.update('tasks', t.id, { pin: false });
+    mesaj = 'Sabitten çıkarıldı — ' + kisalt(t.text);
+  } else if (islem === 'duzenle'){
+    if (!o.metin){ vSet('Yeni metin anlaşılmadı', V.metin); return; }
+    await S.store.update('tasks', t.id, { text: o.metin });
+    mesaj = 'Değiştirildi — ' + kisalt(o.metin);
+  } else if (islem === 'sil'){
+    await S.store.remove('tasks', t.id);
+    mesaj = 'Silindi — ' + kisalt(eski.text);
+    geri = () => S.store.add('tasks', { jobId: eski.jobId, day: eski.day, text: eski.text,
+      done: eski.done, pin: eski.pin, ord: eski.ord, createdAt: eski.createdAt || Date.now() });
+  } else {
+    vSet('Bilinmeyen işlem', V.metin); return;
+  }
+  voiceKapat();
+  noteGeri(mesaj, geri);
+  render();
+}
+
+const kisalt = s => { s = String(s || ''); return s.length > 38 ? s.slice(0, 36) + '…' : s; };
+
 /* geri alınabilir bildirim */
 function noteGeri(msg, geri){
+  document.querySelectorAll('.toast').forEach(n => n.remove());   /* tek bildirim dursun, üst üste binmesin */
   const t = document.createElement('div');
   t.className = 'toast';
   t.innerHTML = `<span>${esc(msg)}</span>`;
@@ -1984,5 +2090,11 @@ window.IzoTodo = {
   render,
   exportData: () => ({ v: 1, jobs: S.jobs, tasks: S.tasks }),
   addJob: (customer, project) => S.store.add('jobs', { customer: customer || '', project: project || '', archived: false, ci: S.jobs.length % SWATCH.length, createdAt: Date.now() }),
-  addTask: (jobId, text, day) => S.store.add('tasks', { jobId, text: text || '', day: day || '', done: false, createdAt: Date.now() })
+  addTask: (jobId, text, day) => S.store.add('tasks', { jobId, text: text || '', day: day || '', done: false, createdAt: Date.now() }),
+  /* test / dış kullanım: sesli komut zincirini metinle çalıştır */
+  komut: (metin) => { V.acik = true; V.metin = metin; sesSon = metin;
+    const e = vEl(); if (e){ e.hidden = false; document.getElementById('v-body').innerHTML = '';
+      document.getElementById('v-acts').innerHTML = ''; }
+    return komutCoz(metin); },
+  sonuc: () => V.sonuc
 };

@@ -543,3 +543,7 @@ html,body{overscroll-behavior-x:contain;}
   .pin-b .task{flex:1 1 210px;min-width:0;}
   .pin-bos{flex:1 1 100%;}
 }
+
+/* silme onayı düğmesi */
+.btn.primary.tehlike{background:var(--warn);border-color:var(--warn);}
+.btn.primary.tehlike:hover{background:var(--warn);filter:brightness(1.07);}
