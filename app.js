@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19w";
+const APP_VERSION = "2026.09.19x";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -680,6 +680,9 @@ function voiceAc(){
 }
 function voiceKapat(){
   V.acik = false;
+  V.cevapModu = false;
+  soruTur = 0;
+  susturKonus();
   sesBitti = true;
   try { sesTanir && sesTanir.abort(); } catch(e){}
   sesTanir = null;
@@ -691,7 +694,29 @@ function voiceKapat(){
    · otomatik kapanma yok — yalnızca "Bitir" tuşu bitirir
    · Chrome motoru kendi kendine kapanırsa (no-speech / onend) sessizce yeniden başlatılır */
 const SES_TUR = 30;                       /* motor kendi kapanırsa en fazla bu kadar yeniden başlat */
+const SORU_TUR = 4;                       /* en fazla bu kadar soru-cevap turu */
 let sesBitti = false, sesSon = '', sesTur = 0;
+
+/* --- program soru sorunca sesli cevap verebilmek için --- */
+let sesGecmis = [];      /* Claude'a giden konuşma geçmişi */
+let soruTur = 0;         /* kaçıncı soru-cevap turu */
+
+/* Soruyu sesli oku, bitince dinlemeye geç (eller meşgulken asıl işe yarayan kısım) */
+function konus(metin, bitince){
+  const devam = () => { try { bitince && bitince(); } catch(e){} };
+  if (!metin || !('speechSynthesis' in window)){ devam(); return; }
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(metin);
+    u.lang = 'tr-TR'; u.rate = 1.05;
+    let acildi = false;
+    const bir = () => { if (acildi) return; acildi = true; devam(); };
+    u.onend = bir; u.onerror = bir;
+    setTimeout(bir, Math.min(9000, 1800 + metin.length * 75));   /* ses motoru takılırsa bekletme */
+    speechSynthesis.speak(u);
+  } catch(e){ devam(); }
+}
+function susturKonus(){ try { speechSynthesis.cancel(); } catch(e){} }
 
 /* Konuşmayı yalnızca kullanıcı bitirir — otomatik kapanma yok. */
 function sesBitir(){
@@ -711,8 +736,26 @@ function sesBaslat(){
   if (!sesDestek()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor (Chrome gerekir).'); return; }
   if (!getSetting('claudekey')){ note('Önce senkron penceresinden Claude API anahtarını girin.'); openSheet(); return; }
   if (sesTanir){ sesBitir(); return; }
+  susturKonus();
   voiceAc();
+  sesGecmis = []; soruTur = 0;            /* yeni komut → geçmiş sıfır */
   sesBitti = false; sesSon = ''; sesTur = 0;
+  sesDinle();
+}
+
+/* Programin sorusuna sesli cevap: geçmişi koruyarak yeniden dinle */
+function sesCevapla(){
+  if (!sesDestek()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor.'); return; }
+  if (sesTanir){ sesBitir(); return; }
+  susturKonus();
+  V.acik = true;
+  const e = vEl(); if (e){ e.hidden = false; e.classList.add('dinliyor'); }
+  document.getElementById('v-acts').innerHTML =
+    '<button class="btn primary" data-act="voice-bitir">Bitir</button>' +
+    '<button class="btn" data-act="voice-close">Vazgeç</button>';
+  vSet('Dinleniyor…', '');
+  sesBitti = false; sesSon = ''; sesTur = 0;
+  V.cevapModu = true;
   sesDinle();
 }
 
@@ -837,6 +880,43 @@ function aiGorevListesi(){
   });
 }
 
+/* Modelin yanıtından JSON'u güvenle çıkar.
+   Greedy regex, JSON'dan sonra gelen açıklama metnini de yutup parse’ı patlatıyordu.
+   Burada ilk { ya da [ bulunup parantezler sayılarak tam olarak eşi kapatılıyor. */
+function jsonAyikla(txt){
+  let t = String(txt || '').trim();
+  t = t.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  const bas = t.search(/[\[{]/);
+  if (bas < 0) return null;
+  const acan = t[bas], kapan = acan === '[' ? ']' : '}';
+  let derinlik = 0, metinde = false, kacis = false;
+  for (let i = bas; i < t.length; i++){
+    const c = t[i];
+    if (metinde){
+      if (kacis) kacis = false;
+      else if (c === '\\') kacis = true;
+      else if (c === '"') metinde = false;
+      continue;
+    }
+    if (c === '"'){ metinde = true; continue; }
+    if (c === acan) derinlik++;
+    else if (c === kapan){
+      derinlik--;
+      if (derinlik === 0){
+        try { return JSON.parse(t.slice(bas, i + 1)); } catch(e){ return null; }
+      }
+    }
+  }
+  return null;
+}
+
+/* Tek komut da olabilir, komut dizisi de (“şunu ve şunu ekle”) */
+function komutDizi(veri){
+  if (Array.isArray(veri)) return veri.filter(x => x && typeof x === 'object');
+  if (veri && Array.isArray(veri.komutlar)) return veri.komutlar.filter(x => x && typeof x === 'object');
+  return veri && typeof veri === 'object' ? [veri] : [];
+}
+
 async function komutCoz(metin){
   vSet('Komut çözülüyor…', metin);
   { const a = document.getElementById('v-acts');
@@ -853,7 +933,9 @@ async function komutCoz(metin){
     'MEVCUT GÖREVLER (gorevId | gün | iş | metin):',
     (gorevler.length ? gorevler.join('\n') : '(görev yok)'),
     '',
-    'SADECE şu şemada geçerli JSON döndür, başka hiçbir şey yazma:',
+    'SADECE geçerli JSON döndür — açıklama, başlık, kod çiti (```) YAZMA. JSON\u2019dan sonra tek karakter bile olmasın.',
+    'Kullanıcı tek cümlede BİRDEN FAZLA iş söylerse ( “şunu ve şunu” ) JSON DİZİSİ döndür: [{…},{…}]. Tek iş varsa tek nesne.',
+    'Şema:',
     '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"anlasilmadi",',
     ' "isId":string|null,"gorevId":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,',
     ' "metin":string|null,"guven":0..1,"soru":string|null}',
@@ -878,20 +960,24 @@ async function komutCoz(metin){
     '- sabit: "sabit", "sabitle", "pinle" geçiyorsa true; görev takvime girmez, gun null olur.',
     '- metin: kısa Türkçe açıklama, komut kalıbı olmadan (örn. "boya yapılacak").',
     '- guven: hedef + tarih birlikte ne kadar kesinse. Emin değilsen 0.7 altında ver.',
-    '- soru: guven düşükse tek cümlelik soru, değilse null.'
+    '- soru: guven düşükse tek cümlelik soru, değilse null. Soru KISA ve TEK olsun — kullanıcı sesle cevaplayacak.',
+    '- Kullanıcı bir önceki sorunun cevabını veriyorsa (örn. sadece bir mimar adı ya da bir gün söylüyorsa) önceki komutu o bilgiyle TAMAMLA; sıfırdan yeni komut sayma.',
+    '- "evet / tamam / olur / onayla" = bir önceki JSON\u2019u aynen tekrar döndür, guven 0.95. "hayır / iptal / vazgeç" = islem "anlasilmadi", soru null.'
   ].join('\n');
 
   try {
     let model = getSetting('claudemodel');
     if (!model){ model = await aiModelSec(); await setSetting('claudemodel', model); }
+    sesGecmis.push({ role: 'user', content: metin });
+    if (sesGecmis.length > 9) sesGecmis = sesGecmis.slice(-9);
     const j = await aiFetch('messages', {
-      model, max_tokens: 400, system: sistem,
-      messages: [{ role: 'user', content: metin }]
+      model, max_tokens: 400, system: sistem, messages: sesGecmis
     });
     const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
-    const m = txt.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Yanıt okunamadı');
-    komutSonuc(JSON.parse(m[0]), metin);
+    const veri = jsonAyikla(txt);
+    if (!veri) throw new Error('Yanıt okunamadı');
+    sesGecmis.push({ role: 'assistant', content: JSON.stringify(veri) });
+    komutSonuc(veri, metin);
   } catch(e){
     vSet('Çözülemedi: ' + e.message, metin);
     document.getElementById('v-acts').innerHTML =
@@ -903,30 +989,101 @@ const ISLEM_AD = { ekle:'Ekle', tasi:'Taşı', sil:'Sil', bitti:'Bitti işaretle
   'geri-al':'Geri aç', sabitle:'Sabitle', 'sabit-kaldir':'Sabitten çıkar', duzenle:'Değiştir' };
 const HEDEF_ISLEM = ['tasi','sil','bitti','geri-al','sabitle','sabit-kaldir','duzenle'];
 
-function komutSonuc(o, ham){
+function komutSonuc(veri, ham){
+  const dizi = komutDizi(veri);
+  if (dizi.length > 1) return komutCoklu(dizi, ham);
+  const o = dizi[0] || {};
   V.sonuc = o;
   const islem = String(o.islem || '');
   const gecerli = (islem === 'ekle' && o.isId && o.metin)
                || (HEDEF_ISLEM.includes(islem) && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
   if (!gecerli){
-    vSet('Anlaşılmadı', ham);
-    document.getElementById('v-body').innerHTML =
-      `<p class="vq">${esc(o.soru || 'Hangi iş için, hangi güne?')}</p>`;
+    const soru = o.soru || 'Hangi iş için, hangi güne?';
+    vSet('Soru', ham);
+    document.getElementById('v-body').innerHTML = `<p class="vq">${esc(soru)}</p>`;
     document.getElementById('v-acts').innerHTML =
-      '<button class="btn primary" data-act="mic">Tekrar söyle</button><button class="btn" data-act="voice-close">Kapat</button>';
+      '<button class="btn primary" data-act="voice-cevap">&#127908; Cevapla</button>' +
+      '<button class="btn" data-act="mic">Baştan söyle</button>' +
+      '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    soruSor(soru);
     return;
   }
   const guven = +o.guven || 0;
   /* Silme asla kendiliğinden yapılmaz — her zaman onay ister. */
   const esik = islem === 'sil' ? 2 : (islem === 'ekle' ? 0.75 : 0.8);
   if (guven >= esik){ komutUygula(o, true); return; }
+  const soru = o.soru || (islem === 'sil' ? 'Bu görev silinsin mi?' : 'Doğru mu?');
   vSet('Onay bekliyor', ham);
-  document.getElementById('v-body').innerHTML = komutOzet(o) +
-    `<p class="vq">${esc(o.soru || (islem === 'sil' ? 'Bu görev silinsin mi?' : 'Doğru mu?'))}</p>`;
+  document.getElementById('v-body').innerHTML = komutOzet(o) + `<p class="vq">${esc(soru)}</p>`;
   document.getElementById('v-acts').innerHTML =
     `<button class="btn primary${islem === 'sil' ? ' tehlike' : ''}" data-act="voice-ok">${esc(ISLEM_AD[islem] || 'Uygula')}</button>` +
-    '<button class="btn" data-act="mic">Tekrar söyle</button>' +
+    '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
+  soruSor(soru, komutSesOzet(o));
+}
+
+/* Birden fazla komut: hepsini özetle, tek onayla uygula */
+function komutCoklu(dizi, ham){
+  const gecerliMi = o => {
+    const i = String(o.islem || '');
+    return (i === 'ekle' && o.isId && o.metin)
+        || (HEDEF_ISLEM.includes(i) && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
+  };
+  const iyi = dizi.filter(gecerliMi);
+  if (!iyi.length){ komutSonuc(dizi[0] || {}, ham); return; }
+  V.coklu = iyi;
+  const silVar = iyi.some(o => String(o.islem) === 'sil');
+  const dusuk  = iyi.some(o => (+o.guven || 0) < 0.8);
+  if (!silVar && !dusuk){ komutCokluUygula(); return; }
+  vSet('Onay bekliyor · ' + iyi.length + ' işlem', ham);
+  document.getElementById('v-body').innerHTML =
+    '<div class="vsum">' + iyi.map(o => {
+      const i = String(o.islem || '');
+      const t = S.tasks.find(x => x.id === o.gorevId);
+      const ne = i === 'ekle' ? (komutIsAdi(o) + ' · ' + gunEtiket(o.gun, o.sabit) + ' · ' + (o.metin || ''))
+                              : ((t && t.text) || '');
+      return `<div><span>${esc(ISLEM_AD[i] || i)}</span><b>${esc(ne)}</b></div>`;
+    }).join('') + '</div>';
+  document.getElementById('v-acts').innerHTML =
+    `<button class="btn primary${silVar ? ' tehlike' : ''}" data-act="voice-coklu">${iyi.length} işlemi uygula</button>` +
+    '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
+    '<button class="btn ghost" data-act="voice-close">İptal</button>';
+  soruSor(iyi.length + ' işlem yapılacak. Onaylıyor musun?');
+}
+
+async function komutCokluUygula(){
+  const dizi = V.coklu || [];
+  V.coklu = null;
+  let n = 0;
+  for (const o of dizi){
+    try { await komutUygula(o, true, true); n++; } catch(e){}
+  }
+  voiceKapat();
+  note(n + ' işlem uygulandı.');
+  render();
+}
+
+/* Soruyu sesli oku, sonra kendiliğinden dinlemeye geç */
+function soruSor(soru, onek){
+  soruTur++;
+  if (soruTur > SORU_TUR) return;                 /* döngüye girmesin */
+  konus((onek ? onek + '. ' : '') + soru, () => {
+    if (!V.acik) return;                          /* pencere kapandıysa dinleme */
+    if (!document.querySelector('[data-act="voice-cevap"]')) return;   /* başka ekrana geçildi */
+    sesCevapla();
+  });
+}
+
+/* Onay ekranında sesle okunacak kısa özet */
+function komutSesOzet(o){
+  const islem = String(o.islem || '');
+  if (islem === 'ekle') return komutIsAdi(o) + ', ' + gunEtiket(o.gun, o.sabit) + ', ' + (o.metin || '');
+  const t = S.tasks.find(x => x.id === o.gorevId);
+  if (!t) return '';
+  if (islem === 'tasi') return t.text + ', ' + gunEtiket(o.gun, false) + '\u2019e ta\u015f\u0131nacak';
+  if (islem === 'sil')  return t.text + ' silinecek';
+  if (islem === 'duzenle') return 'yeni metin: ' + (o.metin || '');
+  return t.text;
 }
 
 function gunEtiket(gun, sabit){
@@ -966,9 +1123,9 @@ function komutIsAdi(o){
   return o.isAd || '—';
 }
 
-async function komutUygula(o, otomatik){
+async function komutUygula(o, otomatik, sessiz){
   const islem = String(o.islem || 'ekle');
-  if (islem !== 'ekle') return komutHedefUygula(o, islem);
+  if (islem !== 'ekle') return komutHedefUygula(o, islem, sessiz);
 
   const id = String(o.isId || '');
   let jobId = null;
@@ -996,6 +1153,7 @@ async function komutUygula(o, otomatik){
   const sabit = !!o.sabit;
   const gorevId = await S.store.add('tasks', { jobId, day: sabit ? '' : (o.gun || ''),
     text: o.metin || V.metin, done: false, pin: sabit, createdAt: Date.now() });
+  if (sessiz) return;
   voiceKapat();
   noteGeri('Eklendi — ' + komutIsAdi(o) + ' · ' + gunEtiket(o.gun, sabit),
            () => S.store.remove('tasks', gorevId));
@@ -1003,7 +1161,7 @@ async function komutUygula(o, otomatik){
 }
 
 /* Var olan bir görev üzerinde işlem: taşı / sil / bitti / geri-al / sabitle / düzenle */
-async function komutHedefUygula(o, islem){
+async function komutHedefUygula(o, islem, sessiz){
   const t = S.tasks.find(x => x.id === o.gorevId);
   if (!t){ vSet('Görev bulunamadı', V.metin); return; }
   const eski = { day: t.day || '', pin: !!t.pin, done: !!t.done, text: t.text || '', ord: t.ord, jobId: t.jobId, createdAt: t.createdAt };
@@ -1037,6 +1195,7 @@ async function komutHedefUygula(o, islem){
   } else {
     vSet('Bilinmeyen işlem', V.metin); return;
   }
+  if (sessiz) return;
   voiceKapat();
   noteGeri(mesaj, geri);
   render();
@@ -1569,6 +1728,8 @@ document.addEventListener('click', async (e) => {
   }
   if (a === 'mic'){ sesBaslat(); return; }
   if (a === 'voice-bitir'){ sesBitir(); return; }
+  if (a === 'voice-cevap'){ sesCevapla(); return; }
+  if (a === 'voice-coklu'){ komutCokluUygula(); return; }
   if (a === 'voice-close'){ voiceKapat(); return; }
   if (a === 'voice-ok'){ if (V.sonuc) komutUygula(V.sonuc, false); return; }
   if (a === 'ai-save'){
@@ -2092,7 +2253,8 @@ window.IzoTodo = {
   addJob: (customer, project) => S.store.add('jobs', { customer: customer || '', project: project || '', archived: false, ci: S.jobs.length % SWATCH.length, createdAt: Date.now() }),
   addTask: (jobId, text, day) => S.store.add('tasks', { jobId, text: text || '', day: day || '', done: false, createdAt: Date.now() }),
   /* test / dış kullanım: sesli komut zincirini metinle çalıştır */
-  komut: (metin) => { V.acik = true; V.metin = metin; sesSon = metin;
+  komut: (metin, devam) => { V.acik = true; V.metin = metin; sesSon = metin;
+    if (!devam){ sesGecmis = []; soruTur = 0; }
     const e = vEl(); if (e){ e.hidden = false; document.getElementById('v-body').innerHTML = '';
       document.getElementById('v-acts').innerHTML = ''; }
     return komutCoz(metin); },
