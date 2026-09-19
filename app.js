@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19l";
+const APP_VERSION = "2026.09.19m";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -129,6 +129,12 @@ const KIND = { O: 'Ofis bölme', K: 'Kapı kasası', S: 'Süpürgelik' };
 /* Sıralama: 1) devam eden işler  2) elle eklenen rehber  3) teklif arşivi */
 function customerList(){
   const map = new Map();   // normalize -> { name, contactId, n, last, src }
+  a42Devam().forEach(x => {                   // A42'de devam eden işlerin müşterileri
+    if (!x.musteri) return;
+    const k = norm(x.musteri);
+    if (!map.has(k)) map.set(k, { name: x.musteri, contactId: null, n: 0, last: '', src: 'job', jobs: 0 });
+    map.get(k).jobs++;
+  });
   S.jobs.forEach(j => {
     if (!j.customer || j.archived) return;
     const k = norm(j.customer);
@@ -169,6 +175,13 @@ function projectList(customer){
   const cn = norm(customer);
   const live = new Map(), mine = new Map(), other = new Map();
   const seen = new Set();
+  a42Devam().forEach(x => {                   // A42'de devam eden işler
+    if (!x.proje) return;
+    const k = norm(x.proje);
+    if (seen.has(k)) return; seen.add(k);
+    live.set(k, { name: x.proje, customer: x.musteri || '', kind: '', year: (String(x.baslangic||'').split('.')[2] || ''),
+                  live: true, same: cn && norm(x.musteri) === cn });
+  });
   S.jobs.forEach(j => {
     if (!j.project || j.archived) return;
     const k = norm(j.project);
