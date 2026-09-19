@@ -488,3 +488,58 @@ details.data p{margin:0;font-size:12.5px;color:var(--ink-2);}
 .hname i.us{color:var(--us);}
 .mday .hname{padding:3px 8px 0;}
 .mday .hname i{font-size:8.5px;letter-spacing:.02em;}
+
+/* ============ genel başlıklar (projeden bağımsız görevler) ============ */
+.task .jl.gen .jp{color:var(--accent-ink);letter-spacing:.12em;}
+.task .jl.gen::before{
+  content:"";width:5px;height:5px;border-radius:50%;background:currentColor;
+  opacity:.45;flex:0 0 auto;align-self:center;margin-right:1px;
+}
+.pop-row.gen .pop-nm{display:flex;align-items:center;gap:7px;}
+.pop-nm .gdot{width:8px;height:8px;border-radius:3px;flex:0 0 auto;display:inline-block;}
+.pop-f .pop-add + .pop-add{margin-top:6px;}
+.pop-add.gen{background:var(--panel-2);border-color:var(--line-2);color:var(--ink-2);}
+.pop-add.gen:hover{border-color:var(--accent);color:var(--accent-ink);}
+.job.gen .job-h .cust{color:var(--accent-ink);opacity:.85;}
+.job.gen{border-style:dashed;}
+
+/* yatay kaydırma tarayıcının geri hareketini tetiklemesin */
+html,body{overscroll-behavior-x:contain;}
+#main{touch-action:pan-y pinch-zoom;}
+
+/* ============ SABİT görevler paneli ============ */
+.weekwrap{display:grid;grid-template-columns:266px minmax(0,1fr);gap:14px;align-items:start;}
+.weekmain{min-width:0;}
+.pinpanel{
+  position:sticky;top:12px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;
+  display:flex;flex-direction:column;max-height:calc(100vh - 120px);
+}
+.pin-h{display:flex;align-items:center;gap:8px;padding:10px 12px 8px;border-bottom:1px solid var(--line);background:var(--panel-2);}
+.pin-h h3{margin:0;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;}
+.pin-n{margin-left:auto;font-family:var(--f-mono);font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.pin-b{padding:8px;display:flex;flex-direction:column;gap:6px;flex:1;overflow-y:auto;min-height:54px;}
+.pin-b .task{background:var(--panel-2);}
+.pin-bos{font-size:11.5px;color:var(--ink-3);line-height:1.5;padding:2px 2px 6px;}
+.pin-f{padding:0 8px 8px;}
+.pinpanel [data-drop].dropon{background:var(--accent-soft);border-radius:8px;}
+
+/* sabitle düğmesi */
+.task .pinb{
+  opacity:0;flex:0 0 auto;color:var(--ink-3);padding:3px 4px;border-radius:4px;
+  display:inline-flex;align-items:center;transition:opacity .12s,color .12s,background .12s;
+}
+.task .pinb svg{width:15px;height:15px;}
+.task:hover .pinb,.task:focus-within .pinb{opacity:1;}
+.task .pinb:hover{color:var(--accent-ink);background:var(--accent-soft);}
+.task .pinb.on{opacity:1;color:var(--accent);}
+@media (hover:none){.task .pinb{opacity:.6;} .task .pinb.on{opacity:1;}}
+
+/* telefon / dar ekran: panel takvimin üstünde, yatay şerit */
+@media (max-width:900px){
+  .weekwrap{grid-template-columns:1fr;gap:10px;}
+  .pinpanel{position:static;max-height:none;}
+  .pin-b{flex-direction:row;flex-wrap:wrap;overflow:visible;}
+  .pin-b .task{flex:1 1 210px;min-width:0;}
+  .pin-bos{flex:1 1 100%;}
+}

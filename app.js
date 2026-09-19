@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19s";
+const APP_VERSION = "2026.09.19u";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -115,6 +115,29 @@ function note(msg){
 }
 
 /* ============ türetilmiş ============ */
+/* ---- Genel başlıklar: projeden / mimardan bağımsız görevler ----
+   Belge kimliği sabit (gen-…) → hangi cihazdan açılırsa açılsın tek kart. */
+const GENEL_HAZIR = [
+  { id:'gen-muhasebe', ad:'Muhasebe',    ci:4 },
+  { id:'gen-ofis',     ad:'Ofis / İdari', ci:6 },
+  { id:'gen-tedarik',  ad:'Tedarikçi',   ci:5 },
+  { id:'gen-kisisel',  ad:'Kişisel',     ci:3 }
+];
+const isGenel = j => !!(j && j.genel);
+const genelJobs = () => S.jobs.filter(j => j.genel && !j.archived);
+/* hazır başlıklar + kullanıcının eklediği genel başlıklar, kayıtlı olan öne geçer */
+function genelListe(){
+  const out = [], gor = new Set();
+  GENEL_HAZIR.forEach(g => {
+    const v = S.jobs.find(j => j.id === g.id);
+    if (v && v.archived) return;
+    gor.add(g.id);
+    out.push({ id: g.id, ad: (v && v.project) || g.ad, ci: (v && typeof v.ci === 'number') ? v.ci : g.ci, var: !!v });
+  });
+  genelJobs().forEach(j => { if (!gor.has(j.id)) out.push({ id: j.id, ad: j.project || 'Genel', ci: j.ci || 0, var: true }); });
+  return out;
+}
+
 const activeJobs = () => S.jobs.filter(j => !j.archived);
 const jobById = id => S.jobs.find(j => j.id === id) || null;
 const jobColor = j => j ? SWATCH[(j.ci || 0) % SWATCH.length] : 'var(--line-2)';
@@ -123,8 +146,9 @@ const ordOf = t => (typeof t.ord === 'number' ? t.ord : (t.createdAt || 0));
 const byDone = (a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) || ordOf(a) - ordOf(b);
 
 const tasksOfDay = d => S.tasks.filter(t => t.day === d && (S.showDone || !t.done)).sort(byDone);
-const undatedTasks = () => S.tasks.filter(t => !t.day && (S.showDone || !t.done)).sort(byDone);
-const lateTasks = () => { const t0 = todayIso(); return S.tasks.filter(t => !t.done && t.day && t.day < t0).sort((a,b) => a.day < b.day ? -1 : 1); };
+const pinnedTasks  = () => S.tasks.filter(t => t.pin && (S.showDone || !t.done)).sort(byDone);
+const undatedTasks = () => S.tasks.filter(t => !t.day && !t.pin && (S.showDone || !t.done)).sort(byDone);
+const lateTasks = () => { const t0 = todayIso(); return S.tasks.filter(t => !t.done && !t.pin && t.day && t.day < t0).sort((a,b) => a.day < b.day ? -1 : 1); };
 /* --- rehber: müşteri/mimar ve proje adları --- */
 const norm = s => String(s || '').trim().toLocaleLowerCase('tr');
 
@@ -223,6 +247,10 @@ const ICON_LIST = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"
   <rect x="8" y="9.25" width="8.5" height="1.5" rx=".75"/>
   <rect x="8" y="13.75" width="8.5" height="1.5" rx=".75"/></svg>`;
 
+const ICON_PIN = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M11.8 2.6 17.4 8.2l-2.3.7a2 2 0 0 0-1 .6l-2.4 2.8-3.9-3.9 2.8-2.4a2 2 0 0 0 .6-1z"/>
+  <path d="M7.8 12.2 3.4 16.6"/></svg>`;
+
 const ICON_COPY = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5">
   <rect x="7" y="7" width="8.5" height="8.5" rx="2"/>
   <path d="M12.5 4.5H6a1.5 1.5 0 0 0-1.5 1.5v6.5"/></svg>`;
@@ -232,6 +260,7 @@ const ICON_COPY = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"
    proje adının ilk haneleri her zaman görünür kalır. */
 function jobLabelHtml(j){
   if (!j) return '<span class="jl"><i class="jp">GENEL</i></span>';
+  if (isGenel(j)) return `<span class="jl gen" title="Genel · ${esc(j.project || '')}"><i class="jp">${esc(j.project || 'GENEL')}</i></span>`;
   const c = j.customer || '', pr = j.project || '';
   return `<span class="jl" title="${esc(jobLabel(j))}">`
     + (c ? `<i class="jc">${esc(c)}</i>` : '')
@@ -242,7 +271,7 @@ function jobLabelHtml(j){
 
 function taskHtml(t, o = {}){
   const j = jobById(t.jobId);
-  const late = !t.done && t.day && t.day < todayIso();
+  const late = !t.done && !t.pin && t.day && t.day < todayIso();
   const meta = o.showDay ? `<span class="dbadge">${t.day ? esc(shortDate(t.day)) : 'tarihsiz'}</span>` : '';
   return `<div class="task${t.done ? ' done' : ''}${late ? ' late' : ''}" data-id="${t.id}">
     <span class="stripe" style="background:${jobColor(j)}" data-drag="${t.id}" title="Sürükle" aria-hidden="true"></span>
@@ -250,7 +279,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : jobLabelHtml(j)}<span class="tt">${esc(t.text)}${meta}</span></span>
-    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
+    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="pinb${t.pin ? ' on' : ''}" data-act="pin" data-id="${t.id}" aria-label="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}" aria-pressed="${t.pin ? 'true' : 'false'}" title="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}">${ICON_PIN}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
 
@@ -260,7 +289,7 @@ function composerHtml(scope){
     `<button type="button" class="jobpick${sec ? '' : ' bos'}" id="c-job" data-act="pick" data-type="job"
        aria-label="İş / proje seç" title="Devam eden işler ve teklif arşivinden seç">
        <span class="jp-nm">${sec ? esc(jobLabel(sec)) : 'İş / proje seç…'}</span>${ICON_LIST}</button>`;
-  const daySel = (scope === 'week' || scope === 'undated') ? '' : `<input type="date" id="c-day" value="${esc(S.draft.day || '')}" aria-label="Gün">`;
+  const daySel = (scope === 'week' || scope === 'undated' || scope === 'pin') ? '' : `<input type="date" id="c-day" value="${esc(S.draft.day || '')}" aria-label="Gün">`;
   return `<div class="composer">${jobSel}${daySel}
     <input type="text" id="c-text" placeholder="Ne yapılacak?" autocomplete="off" aria-label="Görev">
     <div class="row"><button class="btn primary" data-act="save-task">Ekle</button>
@@ -383,7 +412,7 @@ function weekView(){
     h += `</div></div>`;
   }
 
-  h += '<div class="weekgrid">';
+  h += '<div class="weekwrap">' + pinPanelHtml() + '<div class="weekmain"><div class="weekgrid">';
   for (let i = 0; i < 7; i++){
     const d = addDays(start, i), di = iso(d), list = tasksOfDay(di);
     const open = S.tasks.filter(t => t.day === di && !t.done).length;
@@ -405,12 +434,26 @@ function weekView(){
     <span class="ds-hint">buraya bırak</span>
     <button class="btn ghost" data-act="tab" data-v="undated">Aç</button>
   </div>`;
-  return h;
+  return h + '</div></div>';
+}
+
+/* ---- SABİT görevler: takvimde yeri olmayan, hep görünen işler ---- */
+function pinPanelHtml(){
+  const list = pinnedTasks();
+  const composing = S.composer && S.composer.scope === 'pin';
+  return `<aside class="pinpanel" aria-label="Sabit görevler">
+    <div class="pin-h"><h3>Sabit</h3><span class="pin-n">${list.length || ''}</span></div>
+    <div class="pin-b" data-drop="pin">${
+      list.length ? list.map(t => taskHtml(t, { pinli: true })).join('')
+                  : '<div class="pin-bos">Takvimde yeri olmayan işler burada durur — bir kartı buraya sürükleyin ya da aşağıdan ekleyin.</div>'
+    }${composing ? composerHtml('pin') : ''}</div>
+    <div class="pin-f">${composing ? '' : '<button class="addlink" data-act="open-composer" data-scope="pin" data-day="">+ sabit görev</button>'}</div>
+  </aside>`;
 }
 
 function undatedView(){
   const und = undatedTasks();
-  const acik = S.tasks.filter(t => !t.day && !t.done).length;
+  const acik = S.tasks.filter(t => !t.day && !t.pin && !t.done).length;
   const composing = S.composer && S.composer.scope === 'undated';
   let h = `<div class="jobs-head"><h2>Tarihsiz</h2><div class="navbtns">
     <button class="btn" data-act="toggle-done" aria-pressed="${S.showDone}">Bitenler</button>
@@ -445,6 +488,7 @@ function monthView(){
       <button class="btn" data-act="toggle-done" aria-pressed="${S.showDone}">Bitenler</button>
     </div></div>`;
 
+  h += '<div class="weekwrap">' + pinPanelHtml() + '<div class="weekmain">';
   h += '<div class="monthhead">' + DAY_FULL.map(d => `<div>${d}</div>`).join('') + '</div>';
   h += '<div class="monthgrid">';
   for (let i = 0; i < hafta * 7; i++){
@@ -469,7 +513,7 @@ function monthView(){
     <button class="btn ghost" data-act="tab" data-v="undated">Aç</button>
   </div>`;
   h += tatilLegend();
-  return h;
+  return h + '</div></div>';
 }
 
 function tatilLegend(){
@@ -481,7 +525,9 @@ function tatilLegend(){
 }
 
 function jobsView(){
-  const list = S.jobs.filter(j => S.showArchived || !j.archived);
+  const hepsi = S.jobs.filter(j => S.showArchived || !j.archived);
+  const list  = hepsi.filter(j => !j.genel);
+  const genl  = hepsi.filter(j =>  j.genel);
   let h = `<div class="jobs-head"><h2>İşler</h2><div class="navbtns">
     <button class="btn" data-act="toggle-done" aria-pressed="${S.showDone}">Bitenler</button>
     <button class="btn" data-act="toggle-arch" aria-pressed="${S.showArchived}">Arşiv</button>
@@ -502,17 +548,27 @@ function jobsView(){
       <button class="btn ghost" data-act="cancel-composer">İptal</button></div></div></div></div>`;
   }
 
-  if (!list.length && !newJob) return h + blankHtml();
+  if (!list.length && !genl.length && !newJob) return h + blankHtml();
 
-  h += '<div class="joblist">';
-  list.forEach(j => {
+  const kartlar = arr => { let o = '<div class="joblist">'; arr.forEach(j => { o += jobKartHtml(j); }); return o + '</div>'; };
+  if (list.length) h += kartlar(list);
+  else if (!newJob) h += '<p class="empty-note">Henüz proje işi yok.</p>';
+  /* Genel başlıklar ayrı bölümde — mimar/proje kartlarına karışmaz */
+  h += `<div class="band"><div class="band-h"><h3>Genel · projeden bağımsız</h3><span class="rule"></span></div></div>`;
+  h += genl.length ? kartlar(genl)
+     : '<p class="empty-note">Genel görev yok — görev eklerken iş seçiciden “Genel” başlıklarından birini seçin.</p>';
+  return h + dataPanelHtml();
+}
+
+function jobKartHtml(j){
+  {
     const ts = tasksOfJob(j.id);
     const open = S.tasks.filter(t => t.jobId === j.id && !t.done).length;
     const done = S.tasks.filter(t => t.jobId === j.id && t.done).length;
     const composing = S.composer && S.composer.scope === 'job:' + j.id;
-    h += `<article class="job${j.archived ? ' archived' : ''}">
+    return `<article class="job${j.archived ? ' archived' : ''}${j.genel ? ' gen' : ''}">
       <div class="job-h"><span class="swatch" style="background:${jobColor(j)}"></span>
-        <span class="nm"><span class="cust">${esc(j.customer || '—')}</span><div class="proj">${esc(j.project || 'İsimsiz proje')}</div></span>
+        <span class="nm"><span class="cust">${esc(j.genel ? 'GENEL' : (j.customer || '—'))}</span><div class="proj">${esc(j.project || 'İsimsiz proje')}</div></span>
         <span class="acts">
           <button class="btn ghost ico" data-act="dup-job" data-id="${j.id}" title="İşi çoğalt" aria-label="İşi çoğalt">${ICON_COPY}</button>
           <button class="btn ghost" data-act="arch-job" data-id="${j.id}" title="${j.archived ? 'Arşivden çıkar' : 'Arşivle'}">${j.archived ? '↺' : '⌁'}</button>
@@ -521,9 +577,7 @@ function jobsView(){
       <div class="job-b">${ts.length ? ts.map(t => taskHtml(t, { hideJob: true, showDay: true })).join('') : '<div class="empty-note">Görev yok.</div>'}
         ${composing ? composerHtml('job:' + j.id) : `<button class="addlink" data-act="open-composer" data-scope="job:${j.id}" data-day="">+ görev</button>`}
       </div></article>`;
-  });
-  h += '</div>' + dataPanelHtml();
-  return h;
+  }
 }
 
 const blankHtml = () => `<div class="blank"><h3>Henüz iş yok</h3>
@@ -616,7 +670,7 @@ function voiceAc(){
   V.acik = true; V.metin = ''; V.sonuc = null;
   vEl().hidden = false;
   document.getElementById('v-body').innerHTML =
-    '<p class="vq">Rahat konuşun — susunca kendi kapanır, acelesi varsa “Bitir”e basın.</p>';
+    '<p class="vq">Konuşun — dinlemeyi siz bitirene kadar açık kalır. Bitince “Bitir”e basın.</p>';
   document.getElementById('v-acts').innerHTML =
     '<button class="btn primary" data-act="voice-bitir">Bitir</button>' +
     '<button class="btn" data-act="voice-close">Vazgeç</button>';
@@ -626,7 +680,6 @@ function voiceAc(){
 function voiceKapat(){
   V.acik = false;
   sesBitti = true;
-  if (typeof sesSayacDur === 'function') sesSayacDur();
   try { sesTanir && sesTanir.abort(); } catch(e){}
   sesTanir = null;
   const e = vEl(); if (e){ e.hidden = true; e.classList.remove('dinliyor'); }
@@ -637,18 +690,13 @@ function voiceKapat(){
    · SESSIZLIK ms boyunca yeni kelime gelmezse kendi bitirir
    · "Bitir" tuşu istediğin an gönderir
    · Chrome motoru kendi kendine kapanırsa (no-speech / onend) sessizce yeniden başlatılır */
-const SESSIZLIK = 2500;
-let sesSayac = null, sesBitti = false, sesSon = '', sesTur = 0;
+const SES_TUR = 30;                       /* motor kendi kapanırsa en fazla bu kadar yeniden başlat */
+let sesBitti = false, sesSon = '', sesTur = 0;
 
-function sesSayacDur(){ if (sesSayac){ clearTimeout(sesSayac); sesSayac = null; } }
-function sesSayacKur(){
-  sesSayacDur();
-  sesSayac = setTimeout(() => { sesBitir(); }, SESSIZLIK);
-}
-/* kullanıcı "Bitir"e bastı ya da sessizlik doldu */
+/* Konuşmayı yalnızca kullanıcı bitirir — otomatik kapanma yok. */
 function sesBitir(){
   if (sesBitti) return;
-  sesBitti = true; sesSayacDur();
+  sesBitti = true;
   try { sesTanir && sesTanir.stop(); } catch(e){}
   if (!sesSon){                       /* hiç ses gelmediyse stop'u beklemeye gerek yok */
     sesTanir = null;
@@ -680,13 +728,12 @@ function sesDinle(){
     sesSon = (oncesi ? oncesi + ' ' : '') + t.trim();
     V.metin = sesSon;
     vSet(null, sesSon);
-    sesSayacKur();                        /* her yeni kelimede sayaç sıfırlanır */
   };
 
   r.onerror = ev => {
     /* no-speech: Chrome'un kendi sabırsızlığı — kullanıcı daha konuşmadıysa devam et */
-    if (ev.error === 'no-speech' && !sesBitti && sesTur < 3){ return; }
-    sesSayacDur(); sesBitti = true; sesTanir = null;
+    if (ev.error === 'no-speech' && !sesBitti && sesTur < SES_TUR){ return; }
+    sesBitti = true; sesTanir = null;
     vEl().classList.remove('dinliyor');
     const m = { 'not-allowed':'Mikrofon izni verilmedi.', 'service-not-allowed':'Mikrofon izni verilmedi.',
                 'no-speech':'Ses algılanmadı.', 'audio-capture':'Mikrofon bulunamadı.',
@@ -701,11 +748,10 @@ function sesDinle(){
   r.onend = () => {
     sesTanir = null;
     if (!V.acik) return;
-    if (!sesBitti){                       /* motor kendi kapandı → sessizce devam */
-      if (sesTur < 3){ sesTur++; try { sesDinle(); return; } catch(e){} }
+    if (!sesBitti){                       /* motor kendi kapandı → sessizce devam, kullanıcı bitirene kadar */
+      if (sesTur < SES_TUR){ sesTur++; try { sesDinle(); return; } catch(e){} }
       sesBitti = true;
     }
-    sesSayacDur();
     vEl().classList.remove('dinliyor');
     if (!sesSon){
       vSet('Bir şey duyamadım.', '');
@@ -743,8 +789,10 @@ async function aiModelSec(){
 function aiIsListesi(){
   const L = [];
   a42Devam().forEach(x => L.push({ id: 'a42:' + x.is_id, m: x.musteri || '', p: x.proje || '' }));
-  S.jobs.filter(j => !j.archived).forEach(j => L.push({ id: 'job:' + j.id, m: j.customer || '', p: j.project || '' }));
-  return L.slice(0, 60);
+  S.jobs.filter(j => !j.archived && !j.genel).forEach(j => L.push({ id: 'job:' + j.id, m: j.customer || '', p: j.project || '' }));
+  /* genel başlıklar: projeden bağımsız işler (muhasebe, hatırlatma…) */
+  genelListe().forEach(g => L.push({ id: 'job:' + g.id, m: 'GENEL', p: g.ad }));
+  return L.slice(0, 70);
 }
 
 async function komutCoz(metin){
@@ -761,9 +809,11 @@ async function komutCoz(metin){
     isler.map(x => x.id + ' | ' + x.m + ' | ' + x.p).join('\n'),
     '',
     'SADECE şu şemada geçerli JSON döndür, başka hiçbir şey yazma:',
-    '{"islem":"gorev-ekle"|"anlasilmadi","isId":string|null,"isAd":string|null,"gun":"YYYY-MM-DD"|null,"metin":string|null,"guven":0..1,"soru":string|null}',
+    '{"islem":"gorev-ekle"|"anlasilmadi","isId":string|null,"isAd":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,"metin":string|null,"guven":0..1,"soru":string|null}',
     '- isId: listeden EN İYİ eşleşen id. Eşleşme yoksa null ve guven düşük olsun.',
+    '- Müşteri sütunu GENEL olanlar projeden bağımsız başlıklardır. Komutta hiçbir mimar/proje geçmiyorsa (fatura, muhasebe, vergi, SGK, ofis işi, tedarikçi arama, kişisel hatırlatma gibi) bunlardan uygun olanı seç ve guven yüksek olsun — proje uydurma.',
     '- gun: tarih anlaşılmadıysa null (görev tarihsiz eklenir).',
+    '- sabit: kullanıcı "sabit", "sabitle", "sabit olsun", "pinle" derse true — görev takvime girmez, sabit panelinde durur. gun de null olur. Diğer durumlarda false.',
     '- metin: yapılacak işin kısa açıklaması, Türkçe, komut kalıbı olmadan (örn. "boya yapılacak").',
     '- guven: iş eşleşmesi + tarih birlikte ne kadar kesinse. Emin değilsen 0.7 altında ver.',
     '- soru: guven düşükse kullanıcıya sorulacak tek cümlelik soru, değilse null.'
@@ -810,7 +860,7 @@ function komutSonuc(o, ham){
 
 function komutOzet(o){
   const ad = komutIsAdi(o);
-  const g = o.gun ? (DAY_FULL[(fromIso(o.gun).getDay() + 6) % 7] + ' ' + shortDate(o.gun)) : 'tarihsiz';
+  const g = o.sabit ? 'sabit (takvim dışı)' : o.gun ? (DAY_FULL[(fromIso(o.gun).getDay() + 6) % 7] + ' ' + shortDate(o.gun)) : 'tarihsiz';
   return `<div class="vsum">
     <div><span>İş</span><b>${esc(ad)}</b></div>
     <div><span>Gün</span><b>${esc(g)}</b></div>
@@ -818,6 +868,7 @@ function komutOzet(o){
   </div>`;
 }
 function komutIsAdi(o){
+  { const g = genelListe().find(x => 'job:' + x.id === String(o.isId || '')); if (g) return g.ad; }
   if (String(o.isId || '').startsWith('a42:')){
     const x = a42Devam().find(z => 'a42:' + z.is_id === o.isId);
     if (x) return [x.musteri, x.proje].filter(Boolean).join(' · ');
@@ -843,13 +894,21 @@ async function komutUygula(o, otomatik){
     }
   } else {
     jobId = id.replace(/^job:/, '');
-    if (!jobById(jobId)) jobId = null;
+    if (!jobById(jobId)){
+      /* henüz açılmamış hazır genel başlık olabilir */
+      const g = genelListe().find(x => x.id === jobId);
+      if (g){
+        await S.store.setId('jobs', g.id, { customer: '', project: g.ad, genel: true,
+          archived: false, a42Id: '', ci: g.ci, createdAt: Date.now() });
+      } else jobId = null;
+    }
   }
   if (!jobId){ vSet('İş bulunamadı', V.metin); return; }
-  const gorevId = await S.store.add('tasks', { jobId, day: o.gun || '', text: o.metin || V.metin,
-    done: false, createdAt: Date.now() });
+  const sabit = !!o.sabit;
+  const gorevId = await S.store.add('tasks', { jobId, day: sabit ? '' : (o.gun || ''),
+    text: o.metin || V.metin, done: false, pin: sabit, createdAt: Date.now() });
   voiceKapat();
-  const g = o.gun ? shortDate(o.gun) : 'tarihsiz';
+  const g = sabit ? 'sabit' : (o.gun ? shortDate(o.gun) : 'tarihsiz');
   noteGeri((otomatik ? 'Eklendi' : 'Eklendi') + ' — ' + komutIsAdi(o) + ' · ' + g, () => S.store.remove('tasks', gorevId));
   render();
 }
@@ -919,17 +978,26 @@ function renderPicker(){
     const fa = a => a.filter(x => hit(x.proje) || hit(x.musteri));
     const fj = a => a.filter(j => hit(j.project) || hit(j.customer));
     const fp = a => a.filter(p => hit(p.name) || hit(p.customer));
-    body = block('Devam eden işler · A42', fa(devam), arow, CAP)
-         + block('Uygulamada açılan işler', fj(yerel), jrow, 30)
-         + block('Teklif arşivi', fp(teklif), trow, CAP);
+    /* 0) genel başlıklar — projeden / mimardan bağımsız */
+    const gen = genelListe();
+    const grow = g => `<div class="pop-row gen"><button class="pop-pick" data-act="pop-choose" data-genel="${esc(g.id)}" data-val="${esc(g.ad)}" data-ci="${g.ci}">
+      <span class="pop-nm"><span class="gdot" style="background:${SWATCH[g.ci % SWATCH.length]}"></span>${esc(g.ad)}</span>
+      <span class="pop-sub">${g.var ? (tasksOfJob(g.id).length ? tasksOfJob(g.id).length + ' görev' : 'genel') : 'genel'}</span></button></div>`;
+    const fg = a => a.filter(g => hit(g.ad) || hit('genel'));
+    const genBlok = block('Genel · projeden bağımsız', fg(gen), grow, 20);
+    let kalan = block('Devam eden işler · A42', fa(devam), arow, CAP)
+              + block('Uygulamada açılan işler', fj(yerel), jrow, 30)
+              + block('Teklif arşivi', fp(teklif), trow, CAP);
     if (!devam.length){
       const url = getSetting('a42url');
-      body = `<div class="pop-note">${url
+      kalan = `<div class="pop-note">${url
         ? (S.a42.hata ? esc(S.a42.hata) : 'A42\u2019de devam eden iş yok.')
-        : 'A42 bağlantısı tanımlı değil — senkron penceresinden ekleyin.'}</div>` + body;
+        : 'A42 bağlantısı tanımlı değil — senkron penceresinden ekleyin.'}</div>` + kalan;
     }
+    body = genBlok + kalan;
     if (!body) body = '<div class="pop-empty">Kayıt yok.</div>';
-    if (q.trim()) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” için yeni iş aç</button>`;
+    if (q.trim()) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” için yeni iş aç</button>`
+      + `<button class="pop-add gen" data-act="pop-add-gen">+ “${esc(q.trim())}” genel başlığı ekle</button>`;
   } else if (type === 'customer'){
     const L = customerList();
     title = 'Müşteri / Mimar';
@@ -991,6 +1059,21 @@ function renderPicker(){
 
 /* Görev yazarken iş seçimi: mevcut işi seç, ya da arşivdeki teklif için
    sessizce bir iş kartı aç ve göreve onu bağla. */
+/* Genel başlık seç — yoksa sabit kimlikle aç (cihazlar arası tek kart). */
+async function genelChoose(id, ad, ci){
+  if (!id) return;
+  if (!jobById(id)){
+    await S.store.setId('jobs', id, { customer: '', project: ad || 'Genel', genel: true,
+      archived: false, a42Id: '', ci: ci || 0, createdAt: Date.now() });
+    note('Genel başlık açıldı — ' + (ad || 'Genel'));
+  }
+  S.draft.job = id;
+  const t = document.getElementById('c-text');
+  if (t) S.draft.text = t.value;
+  closePicker();
+  render();
+}
+
 async function jobChoose(jobId, proje, musteri, a42Id){
   if (!jobId && a42Id){
     const v = S.jobs.find(j => String(j.a42Id || '') === String(a42Id));
@@ -1109,7 +1192,7 @@ function render(){
   document.getElementById('tab-week').setAttribute('aria-selected', S.tab === 'week');
   document.getElementById('tab-und').setAttribute('aria-selected', S.tab === 'undated');
   document.getElementById('tab-jobs').setAttribute('aria-selected', S.tab === 'jobs');
-  const undN = S.tasks.filter(t => !t.day && !t.done).length;
+  const undN = S.tasks.filter(t => !t.day && !t.pin && !t.done).length;
   const undRozet = document.getElementById('und-n');
   if (undRozet){ undRozet.textContent = undN || ''; undRozet.hidden = !undN; }
   main.innerHTML = S.tab === 'week' ? (S.view === 'month' && window.innerWidth >= 1000 ? monthView() : weekView())
@@ -1150,11 +1233,12 @@ function saveTask(){
     day = de && de.value ? de.value : '';
   } else {
     jobId = S.draft.job || '';
-    day = S.composer.day;
+    day = scope === 'pin' ? '' : S.composer.day;
     if (!jobId || !jobById(jobId)){ note('Önce bir iş / proje seçin.'); document.getElementById('c-job')?.click(); return; }
   }
   S.draft.job = jobId;
-  S.store.add('tasks', { jobId, day: day || '', text, done: false, createdAt: Date.now() });
+  S.store.add('tasks', { jobId, day: day || '', text, done: false,
+    pin: scope === 'pin', createdAt: Date.now() });
   S.draft.text = '';
   render();
   const t = document.getElementById('c-text'); if (t) t.focus();
@@ -1290,6 +1374,14 @@ document.addEventListener('click', async (e) => {
   if (a === 'open-composer'){ openComposer(b.dataset.scope, b.dataset.day); return; }
   if (a === 'cancel-composer'){ S.composer = null; S.draft.text = ''; render(); return; }
   if (a === 'save-task'){ saveTask(); return; }
+  if (a === 'pin'){
+    const t = S.tasks.find(x => x.id === id);
+    if (!t) return;
+    const yeni = !t.pin;
+    S.store.update('tasks', id, { pin: yeni, day: yeni ? '' : (t.day || '') });
+    note(yeni ? 'Sabitlendi' : 'Sabitten \u00e7\u0131kar\u0131ld\u0131');
+    return;
+  }
   if (a === 'day-fwd'){
     const t = S.tasks.find(x => x.id === id);
     if (!t || !t.day) return;
@@ -1303,8 +1395,18 @@ document.addEventListener('click', async (e) => {
   if (a === 'pop-close'){ closePicker(); return; }
   if (a === 'pop-all'){ if (S.picker){ S.picker.all = true; renderPicker(); } return; }
   if (a === 'pop-choose'){
-    if (S.picker && S.picker.type === 'job'){ jobChoose(b.dataset.job, b.dataset.val, b.dataset.cust, b.dataset.a42); return; }
+    if (S.picker && S.picker.type === 'job'){
+      if (b.dataset.genel){ genelChoose(b.dataset.genel, b.dataset.val, +b.dataset.ci || 0); return; }
+      jobChoose(b.dataset.job, b.dataset.val, b.dataset.cust, b.dataset.a42); return;
+    }
     pickerChoose(b.dataset.val, b.dataset.cust); return;
+  }
+  if (a === 'pop-add-gen'){
+    const v = (document.getElementById('pop-q')?.value || '').trim();
+    if (!v) return;
+    genelChoose('gen-' + norm(v).replace(/[^a-z0-9ğüşıöç]+/gi, '-').replace(/^-|-$/g, '').slice(0, 40),
+                v, (genelJobs().length + 4) % SWATCH.length);
+    return;
   }
   if (a === 'pop-del'){
     const c = S.contacts.find(x => x.id === id);
@@ -1379,7 +1481,7 @@ document.addEventListener('click', async (e) => {
     if (!t) return;
     const ayni = S.tasks.filter(x => (x.day || '') === (t.day || '')).sort(byDone);
     const i = ayni.findIndex(x => x.id === id);
-    S.store.add('tasks', { jobId: t.jobId, day: t.day || '', text: t.text,
+    S.store.add('tasks', { jobId: t.jobId, day: t.day || '', text: t.text, pin: !!t.pin,
       done: false, createdAt: Date.now(), ord: ordBetween(ayni[i], ayni[i + 1]) });
     note('Görev çoğaltıldı.');
     return;
@@ -1612,7 +1714,7 @@ function ordBetween(prev, next){
    olması gerekmesin — gün kartının herhangi bir yeri, hatta yakını yeter. */
 function hedefBul(x, y){
   const liste = [...document.querySelectorAll('[data-drop]')].map(box => ({
-    box, r: (box.closest('.day') || box).getBoundingClientRect()
+    box, r: (box.closest('.day') || box.closest('.pinpanel') || box).getBoundingClientRect()
   })).filter(t => t.r.width > 0 && t.r.height > 0);
   for (const t of liste){
     if (x >= t.r.left && x <= t.r.right && y >= t.r.top && y <= t.r.bottom) return t.box;
@@ -1693,6 +1795,52 @@ document.addEventListener('pointerdown', e => {
 /* sürükleme başladıysa sayfa kaymasın */
 document.addEventListener('touchmove', e => { if (drag && drag.on) e.preventDefault(); }, { passive: false });
 
+/* ============ telefonda yatay kaydırma ile hafta değiştirme ============
+   Sola kaydır → sonraki hafta, sağa kaydır → önceki hafta.
+   Görev sürüklerken, çoklu dokunuşta ve yazarken devre dışı. */
+const SWIPE_ESIK = 60, SWIPE_EGIM = 1.6;
+let sw = null;
+
+main.addEventListener('touchstart', e => {
+  sw = null;
+  if (e.touches.length !== 1) return;
+  if (S.tab !== 'week') return;
+  if (drag && drag.on) return;
+  if (document.getElementById('pop')) return;                   // seçici açık
+  if (e.target.closest('input, textarea, select, .composer, .sg')) return;
+  const t = e.touches[0];
+  /* ekran kenarı telefonun kendi "geri" hareketine ait — oraya karışma */
+  if (t.clientX < 30 || t.clientX > window.innerWidth - 30) return;
+  sw = { x: t.clientX, y: t.clientY, t: Date.now(), iptal: false };
+}, { passive: true });
+
+main.addEventListener('touchmove', e => {
+  if (!sw || e.touches.length !== 1) { sw = null; return; }
+  if (drag && drag.on){ sw = null; return; }
+  const t = e.touches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y;
+  /* dikey niyet belliyse kaydırmayı bırak — sayfa normal kaysın */
+  if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) sw.iptal = true;
+}, { passive: true });
+
+main.addEventListener('touchend', e => {
+  const s = sw; sw = null;
+  if (!s || s.iptal) return;
+  if (drag && drag.on) return;
+  const t = e.changedTouches && e.changedTouches[0];
+  if (!t) return;
+  const dx = t.clientX - s.x, dy = t.clientY - s.y;
+  if (Math.abs(dx) < SWIPE_ESIK) return;
+  if (Math.abs(dx) < Math.abs(dy) * SWIPE_EGIM) return;
+  if (Date.now() - s.t > 800) return;                            // yavaş sürtme sayılmaz
+  const yon = dx < 0 ? 1 : -1;                                   // sola = ileri
+  S.weekStart = addDays(S.weekStart, 7 * yon);
+  S.composer = null;
+  render();
+  try { navigator.vibrate && navigator.vibrate(8); } catch(err){}
+  const b = S.weekStart, s2 = addDays(b, 6);
+  note(rangeLabel(b, s2));
+}, { passive: true });
+
 document.addEventListener('pointermove', e => {
   if (!drag) return;
   const uzaklik = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0);
@@ -1733,18 +1881,22 @@ function endDrag(apply){
   document.querySelectorAll('[data-drop].dropon').forEach(n => n.classList.remove('dropon'));
   if (!apply || !d.on || !d.box) return;
 
-  const gun = d.box.dataset.drop;
+  const hedef = d.box.dataset.drop;
   const t = S.tasks.find(x => x.id === d.id);
   if (!t) return;
-  const komsular = S.tasks
-    .filter(x => (x.day || '') === gun && x.id !== d.id && (S.showDone || !x.done))
-    .sort(byDone);
+  const sabit = hedef === 'pin';
+  const gun = sabit ? '' : hedef;
+  const komsular = sabit
+    ? S.tasks.filter(x => x.pin && x.id !== d.id && (S.showDone || !x.done)).sort(byDone)
+    : S.tasks.filter(x => !x.pin && (x.day || '') === gun && x.id !== d.id && (S.showDone || !x.done)).sort(byDone);
   const beforeId = d.before?.dataset.id || null;
   const i = beforeId ? komsular.findIndex(x => x.id === beforeId) : komsular.length;
   const yer = i < 0 ? komsular.length : i;
   const yeniOrd = ordBetween(komsular[yer - 1], komsular[yer]);
-  if ((t.day || '') === gun && Math.abs(ordOf(t) - yeniOrd) < 1) return;
-  S.store.update('tasks', d.id, { day: gun, ord: yeniOrd });
+  if (!!t.pin === sabit && (t.day || '') === gun && Math.abs(ordOf(t) - yeniOrd) < 1) return;
+  S.store.update('tasks', d.id, { day: gun, ord: yeniOrd, pin: sabit });
+  if (sabit && !t.pin) note('Sabitlendi');
+  else if (!sabit && t.pin) note('Sabitten \u00e7\u0131kar\u0131ld\u0131');
 }
 
 document.addEventListener('pointerup', () => endDrag(true));
