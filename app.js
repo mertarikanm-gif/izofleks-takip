@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19x";
+const APP_VERSION = "2026.09.19y";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -122,7 +122,8 @@ const GENEL_HAZIR = [
   { id:'gen-muhasebe', ad:'Muhasebe',    ci:4 },
   { id:'gen-ofis',     ad:'Ofis / İdari', ci:6 },
   { id:'gen-tedarik',  ad:'Tedarikçi',   ci:5 },
-  { id:'gen-kisisel',  ad:'Kişisel',     ci:3 }
+  { id:'gen-kisisel',  ad:'Kişisel',     ci:3 },
+  { id:'gen-dijital',  ad:'Dijital',      ci:1 }
 ];
 const isGenel = j => !!(j && j.genel);
 const genelJobs = () => S.jobs.filter(j => j.genel && !j.archived);
