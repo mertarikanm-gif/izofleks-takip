@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20a";
+const APP_VERSION = "2026.09.20b";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -761,7 +761,7 @@ function sesBaslat(){
   susturKonus();
   voiceAc();
   sesGecmis = []; soruTur = 0;            /* yeni komut → geçmiş sıfır */
-  sesBitti = false; sesSon = ''; sesTur = 0;
+  sesBitti = false; sesSon = ''; sesKesin = ''; sesTur = 0;
   sesDinle();
 }
 
@@ -776,45 +776,81 @@ function sesCevapla(){
     '<button class="btn primary" data-act="voice-bitir">Bitir</button>' +
     '<button class="btn" data-act="voice-close">Vazgeç</button>';
   vSet('Dinleniyor…', '');
-  sesBitti = false; sesSon = ''; sesTur = 0;
+  sesBitti = false; sesSon = ''; sesKesin = ''; sesTur = 0;
   V.cevapModu = true;
   sesDinle();
 }
 
+/* İki metni örtüşmeyi tekrarlamadan birleştir.
+   Motor yeniden başladığında aynı sesi bir daha yazıya çevirebiliyor —
+   "PazartesiPazartesi için…" tekrarının sebebi buydu. */
+function birlestir(a, b){
+  a = String(a || '').trim(); b = String(b || '').trim();
+  if (!a) return b;
+  if (!b) return a;
+  const A = a.toLocaleLowerCase('tr'), B = b.toLocaleLowerCase('tr');
+  if (A.endsWith(B)) return a;                 /* yeni parça zaten sonda var */
+  if (B.startsWith(A)) return b;               /* yeni parça eskisini kapsıyor */
+  const n = Math.min(A.length, B.length);
+  for (let k = n; k >= 4; k--){                /* kuyruk-baş örtüşmesini kırp */
+    if (A.slice(-k) === B.slice(0, k)) return a + b.slice(k);
+  }
+  return a + ' ' + b;
+}
+
+let sesKesin = '';        /* önceki oturumlarda kesinleşmiş metin */
+
 function sesDinle(){
   const r = new SR();
   sesTanir = r;
-  const oncesi = sesSon;                 /* bu turdan önce biriken metin */
+  let oturumKesin = '', gecici = '';
   r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 1; r.continuous = true;
 
-  r.onresult = ev => {
-    let t = '';
-    for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript;
-    sesSon = (oncesi ? oncesi + ' ' : '') + t.trim();
+  const yenile = () => {
+    sesSon = birlestir(sesKesin, birlestir(oturumKesin, gecici));
     V.metin = sesSon;
     vSet(null, sesSon);
+  };
+
+  r.onresult = ev => {
+    let kes = '', gec = '';
+    for (let i = 0; i < ev.results.length; i++){
+      const par = ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) kes = birlestir(kes, par);
+      else gec = birlestir(gec, par);
+    }
+    oturumKesin = kes; gecici = gec;
+    yenile();
+  };
+
+  const oturumuKapat = () => {                 /* bu oturumun kesin metnini biriktir */
+    sesKesin = birlestir(sesKesin, oturumKesin);
+    oturumKesin = ''; gecici = '';
+    sesSon = sesKesin;
   };
 
   r.onerror = ev => {
     /* no-speech: Chrome'un kendi sabırsızlığı — kullanıcı daha konuşmadıysa devam et */
     if (ev.error === 'no-speech' && !sesBitti && sesTur < SES_TUR){ return; }
+    oturumuKapat();
     sesBitti = true; sesTanir = null;
     vEl().classList.remove('dinliyor');
     const m = { 'not-allowed':'Mikrofon izni verilmedi.', 'service-not-allowed':'Mikrofon izni verilmedi.',
                 'no-speech':'Ses algılanmadı.', 'audio-capture':'Mikrofon bulunamadı.',
                 'aborted':'Dinleme durduruldu.',
                 'network':'İnternet bağlantısı gerekiyor.' }[ev.error] || ('Ses hatası: ' + ev.error);
-    if (sesSon){ komutCoz(sesSon); return; }   /* elde metin varsa yine de çöz */
+    if (sesSon){ komutCoz(sesSon); return; }
     vSet(m, sesSon);
     document.getElementById('v-acts').innerHTML =
       '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
   };
 
   r.onend = () => {
+    oturumuKapat();
     sesTanir = null;
     if (!V.acik) return;
-    if (!sesBitti){                       /* motor kendi kapandı → sessizce devam, kullanıcı bitirene kadar */
-      if (sesTur < SES_TUR){ sesTur++; try { sesDinle(); return; } catch(e){} }
+    if (!sesBitti){                       /* motor kendi kapandı → sessizce devam */
+      if (sesTur < SES_TUR){ sesTur++; setTimeout(() => { if (!sesBitti && V.acik && !sesTanir) { try { sesDinle(); } catch(e){} } }, 200); return; }
       sesBitti = true;
     }
     vEl().classList.remove('dinliyor');
