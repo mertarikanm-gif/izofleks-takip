@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20h";
+const APP_VERSION = "2026.09.20i";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -760,6 +760,9 @@ function sesBaslat(){
 function sesCevapla(){
   if (!sesDestek()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor.'); return; }
   if (sesTanir){ sesBitir(); return; }
+  ekranBilet++;
+  if (soruZaman){ clearTimeout(soruZaman); soruZaman = null; }
+  sesIptal = false;
   susturKonus();
   V.acik = true;
   const e = vEl(); if (e){ e.hidden = false; e.classList.add('dinliyor'); }
@@ -1139,6 +1142,8 @@ const ISLEM_AD = { ekle:'Ekle', tasi:'Taşı', sil:'Sil', bitti:'Bitti işaretle
 const HEDEF_ISLEM = ['tasi','sil','bitti','geri-al','sabitle','sabit-kaldir','duzenle','is-degistir'];
 
 function komutSonuc(veri, ham){
+  ekranBilet++;
+  if (soruZaman){ clearTimeout(soruZaman); soruZaman = null; }
   const dizi = komutDizi(veri);
   if (dizi.length > 1) return komutCoklu(dizi, ham);
   const o = dizi[0] || {};
@@ -1168,6 +1173,7 @@ function komutSonuc(veri, ham){
   const esik = islem === 'sil' ? 2 : (islem === 'ekle' ? 0.75 : 0.8);
   if (guven >= esik){ komutUygula(o, true); return; }
   const soru = o.soru || (islem === 'sil' ? 'Bu görev silinsin mi?' : 'Doğru mu?');
+  ekranKilitle();
   vSet('Onay bekliyor', ham);
   document.getElementById('v-body').innerHTML = komutOzet(o) + `<p class="vq">${esc(soru)}</p>`;
   document.getElementById('v-acts').innerHTML =
@@ -1192,6 +1198,7 @@ function komutCoklu(dizi, ham){
   const silVar = iyi.some(o => String(o.islem) === 'sil');
   const dusuk  = iyi.some(o => (+o.guven || 0) < 0.8);
   if (!silVar && !dusuk){ komutCokluUygula(); return; }
+  ekranKilitle();
   vSet('Onay bekliyor · ' + iyi.length + ' işlem', ham);
   document.getElementById('v-body').innerHTML =
     '<div class="vsum">' + iyi.map(o => {
@@ -1233,10 +1240,28 @@ function yazDuzeltHtml(ham){
 
 /* Sadece SORU ekranında (basılacak karar düğmesi yokken) kendiliğinden dinlemeye geçer.
    Onay ekranlarında geçmez; orada karar düğmesi ya da 🎤 Cevapla var. */
+/* Ekran her değiştiğinde bilet artar; eski zamanlayıcı kendini geçersiz sayar. */
+let ekranBilet = 0, soruZaman = null;
+
+/* Onay ekranı açılırken: bekleyen dinleme zamanlayıcısını iptal et,
+   arkada hala çalışan tanıyıcıyı sessizce durdur (ekranı ezmesin). */
+function ekranKilitle(){
+  ekranBilet++;
+  if (soruZaman){ clearTimeout(soruZaman); soruZaman = null; }
+  sesIptal = true; sesBitti = true;
+  try { sesTanir && sesTanir.abort(); } catch(e){}
+  sesTanir = null;
+  const el = vEl(); if (el) el.classList.remove('dinliyor');
+}
+
 function soruSor(){
   soruTur++;
   if (soruTur > SORU_TUR) return;                 /* döngüye girmesin */
-  setTimeout(() => {
+  const bilet = ekranBilet;
+  if (soruZaman) clearTimeout(soruZaman);
+  soruZaman = setTimeout(() => {
+    soruZaman = null;
+    if (bilet !== ekranBilet) return;        /* ekran değişti — karışma */
     if (!V.acik) return;
     if (!document.querySelector('[data-act="voice-cevap"]')) return;
     sesCevapla();
