@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19p";
+const APP_VERSION = "2026.09.19r";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -53,6 +53,9 @@ function localStore(){
     kind: 'local',
     subscribe(c, cb){ subs[c].push(cb); cb(data[c].slice()); return () => { subs[c] = subs[c].filter(f => f !== cb); }; },
     add(c, o){ const id = 'l' + Date.now().toString(36) + (++seq); data[c].push({ id, ...o }); persist(); emit(c); return Promise.resolve(id); },
+    setId(c, id, o){ const v = data[c].find(r => r.id === id);
+      if (v) Object.assign(v, o); else data[c].push({ id, ...o });
+      persist(); emit(c); return Promise.resolve(id); },
     update(c, id, p){ data[c] = data[c].map(r => r.id === id ? { ...r, ...p } : r); persist(); emit(c); return Promise.resolve(); },
     remove(c, id){ data[c] = data[c].filter(r => r.id !== id); persist(); emit(c); return Promise.resolve(); }
   };
@@ -70,6 +73,7 @@ function firestoreStore(fs, uid){
         err => { console.warn(err); note('Senkron hatası: ' + (err.code || 'bilinmiyor')); });
     },
     add(c, o){ const ref = doc(base(c)); return setDoc(ref, o).then(() => ref.id); },
+    setId(c, id, o){ return setDoc(doc(db, 'users', uid, c, id), o, { merge: true }).then(() => id); },
     update(c, id, p){ return updateDoc(doc(db, 'users', uid, c, id), p); },
     remove(c, id){ return deleteDoc(doc(db, 'users', uid, c, id)); }
   };
@@ -777,7 +781,7 @@ async function komutUygula(o, otomatik){
     if (v) jobId = v.id;
     else {
       const x = a42Devam().find(z => z.is_id === isId);
-      jobId = await S.store.add('jobs', { customer: (x && x.musteri) || '', project: (x && x.proje) || '',
+      jobId = await S.store.setId('jobs', 'a42-' + isId, { customer: (x && x.musteri) || '', project: (x && x.proje) || '',
         archived: false, a42Id: isId, ci: S.jobs.length % SWATCH.length, createdAt: Date.now() });
       ensureContact(x && x.musteri);
     }
@@ -937,10 +941,18 @@ async function jobChoose(jobId, proje, musteri, a42Id){
     if (v) jobId = v.id;
   }
   if (!jobId){
-    jobId = await S.store.add('jobs', {
-      customer: musteri || '', project: proje || '', archived: false,
-      a42Id: a42Id || '', ci: S.jobs.length % SWATCH.length, createdAt: Date.now()
-    });
+    if (a42Id){
+      /* Sabit belge kimliği: aynı A42 işi hangi cihazdan seçilirse seçilsin tek kart açılır. */
+      jobId = await S.store.setId('jobs', 'a42-' + a42Id, {
+        customer: musteri || '', project: proje || '', archived: false,
+        a42Id: String(a42Id), ci: S.jobs.length % SWATCH.length, createdAt: Date.now()
+      });
+    } else {
+      jobId = await S.store.add('jobs', {
+        customer: musteri || '', project: proje || '', archived: false,
+        a42Id: '', ci: S.jobs.length % SWATCH.length, createdAt: Date.now()
+      });
+    }
     ensureContact(musteri);
     note('İş kartı açıldı — ' + (proje || musteri));
   }
