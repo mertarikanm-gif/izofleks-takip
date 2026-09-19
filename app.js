@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19g";
+const APP_VERSION = "2026.09.19h";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -219,8 +219,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : `<span class="jl">${esc(jobLabel(j))}</span>`}<span class="tt">${esc(t.text)}${meta}</span></span>
-    <button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button>
-    <button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button>
+    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
 
@@ -229,7 +228,7 @@ function composerHtml(scope){
   const opts = jobs.map(j => `<option value="${j.id}"${S.draft.job === j.id ? ' selected' : ''}>${esc(jobLabel(j))}</option>`).join('');
   const jobSel = scope.startsWith('job:') ? '' :
     `<select id="c-job" aria-label="İş seç">${jobs.length ? '' : '<option value="">— önce iş ekleyin —</option>'}${opts}</select>`;
-  const daySel = scope === 'week' ? '' : `<input type="date" id="c-day" value="${esc(S.draft.day || '')}" aria-label="Gün">`;
+  const daySel = (scope === 'week' || scope === 'undated') ? '' : `<input type="date" id="c-day" value="${esc(S.draft.day || '')}" aria-label="Gün">`;
   return `<div class="composer">${jobSel}${daySel}
     <input type="text" id="c-text" placeholder="Ne yapılacak?" autocomplete="off" aria-label="Görev">
     <div class="row"><button class="btn primary" data-act="save-task">Ekle</button>
@@ -276,12 +275,30 @@ function weekView(){
   }
   h += '</div>';
 
+  // ince bırakma şeridi — tam liste artık Tarihsiz sekmesinde
+  const n = undatedTasks().length;
+  h += `<div class="dropstrip" data-drop="">
+    <span class="ds-t">Tarihsiz</span>
+    <span class="ds-n">${n ? n + ' görev' : 'boş'}</span>
+    <span class="ds-hint">buraya bırak</span>
+    <button class="btn ghost" data-act="tab" data-v="undated">Aç</button>
+  </div>`;
+  return h;
+}
+
+function undatedView(){
   const und = undatedTasks();
-  const composingU = S.composer && S.composer.scope === 'week' && S.composer.day === '';
-  h += `<div class="band"><div class="band-h"><h3>Tarihsiz</h3><span class="rule"></span>
-    <button class="btn ghost" data-act="open-composer" data-scope="week" data-day="">+ ekle</button></div>
-    <div class="chips" data-drop="">${und.length ? und.map(t => taskHtml(t)).join('') : '<div class="empty-note">Tarihe bağlı olmayan görev yok.</div>'}
-    ${composingU ? `<div style="min-width:240px;flex:1 1 240px">${composerHtml('week')}</div>` : ''}</div></div>`;
+  const acik = S.tasks.filter(t => !t.day && !t.done).length;
+  const composing = S.composer && S.composer.scope === 'undated';
+  let h = `<div class="jobs-head"><h2>Tarihsiz</h2><div class="navbtns">
+    <button class="btn" data-act="toggle-done" aria-pressed="${S.showDone}">Bitenler</button>
+    <button class="btn primary" data-act="open-composer" data-scope="undated" data-day="">+ Görev</button></div></div>
+    <p class="who">Tarihe bağlı olmayan genel işler · ${acik} açık</p>`;
+  h += `<div class="undlist" data-drop="">`;
+  h += und.length ? und.map(t => taskHtml(t)).join('')
+                  : '<div class="empty-note">Tarihe bağlı olmayan görev yok.</div>';
+  h += composing ? composerHtml('undated') : '';
+  h += `</div>`;
   return h;
 }
 
@@ -519,8 +536,12 @@ function sgPick(k){
 /* ============ render ============ */
 function render(){
   document.getElementById('tab-week').setAttribute('aria-selected', S.tab === 'week');
+  document.getElementById('tab-und').setAttribute('aria-selected', S.tab === 'undated');
   document.getElementById('tab-jobs').setAttribute('aria-selected', S.tab === 'jobs');
-  main.innerHTML = S.tab === 'week' ? weekView() : jobsView();
+  const undN = S.tasks.filter(t => !t.day && !t.done).length;
+  const undRozet = document.getElementById('und-n');
+  if (undRozet){ undRozet.textContent = undN || ''; undRozet.hidden = !undN; }
+  main.innerHTML = S.tab === 'week' ? weekView() : S.tab === 'undated' ? undatedView() : jobsView();
   const txt = document.getElementById('c-text');
   if (txt){ txt.value = S.draft.text; txt.focus(); try { txt.setSelectionRange(txt.value.length, txt.value.length); } catch(e){} }
   const jc = document.getElementById('j-cust'), jp = document.getElementById('j-proj');
@@ -657,6 +678,14 @@ document.addEventListener('click', async (e) => {
   if (a === 'open-composer'){ openComposer(b.dataset.scope, b.dataset.day); return; }
   if (a === 'cancel-composer'){ S.composer = null; S.draft.text = ''; render(); return; }
   if (a === 'save-task'){ saveTask(); return; }
+  if (a === 'day-fwd'){
+    const t = S.tasks.find(x => x.id === id);
+    if (!t || !t.day) return;
+    const yeni = iso(addDays(fromIso(t.day), 1));
+    S.store.update('tasks', id, { day: yeni });
+    if (yeni > iso(addDays(S.weekStart, 6))) note('Gelecek haftaya taşındı — ' + shortDate(yeni));
+    return;
+  }
   if (a === 'open-job-form'){ S.tab = 'jobs'; S.composer = { scope: 'newjob', day: '' }; S.newJob = { customer: '', project: '' }; render(); return; }
   if (a === 'pick'){ openPicker(b.dataset.type, b); return; }
   if (a === 'pop-close'){ closePicker(); return; }
@@ -835,7 +864,7 @@ function bind(store, label, kind){
 /* ============ açılış ============ */
 try {
   const v = new URLSearchParams(location.search).get('v');
-  if (v === 'jobs' || v === 'week') S.tab = v;
+  if (v === 'jobs' || v === 'week' || v === 'undated') S.tab = v;
 } catch(e){}
 render();
 bind(localStore(), 'yerel', 'off');
