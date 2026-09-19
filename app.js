@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19m";
+const APP_VERSION = "2026.09.19n";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -224,6 +224,18 @@ const ICON_COPY = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"
   <path d="M12.5 4.5H6a1.5 1.5 0 0 0-1.5 1.5v6.5"/></svg>`;
 
 /* ============ parçalar ============ */
+/* Müşteri ve proje ayrı parça: yer daraldığında önce müşteri kısalır,
+   proje adının ilk haneleri her zaman görünür kalır. */
+function jobLabelHtml(j){
+  if (!j) return '<span class="jl"><i class="jp">GENEL</i></span>';
+  const c = j.customer || '', pr = j.project || '';
+  return `<span class="jl" title="${esc(jobLabel(j))}">`
+    + (c ? `<i class="jc">${esc(c)}</i>` : '')
+    + (c && pr ? '<i class="jx">·</i>' : '')
+    + (pr ? `<i class="jp">${esc(pr)}</i>` : '')
+    + '</span>';
+}
+
 function taskHtml(t, o = {}){
   const j = jobById(t.jobId);
   const late = !t.done && t.day && t.day < todayIso();
@@ -233,7 +245,7 @@ function taskHtml(t, o = {}){
     <button class="box" data-act="toggle" data-id="${t.id}" aria-label="Tamamlandı işaretle" aria-pressed="${t.done ? 'true' : 'false'}">
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <span class="body">${o.hideJob ? '' : `<span class="jl">${esc(jobLabel(j))}</span>`}<span class="tt">${esc(t.text)}${meta}</span></span>
+    <span class="body">${o.hideJob ? '' : jobLabelHtml(j)}<span class="tt">${esc(t.text)}${meta}</span></span>
     <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
