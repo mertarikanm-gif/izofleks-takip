@@ -550,3 +550,13 @@ html,body{overscroll-behavior-x:contain;}
 
 /* bekleyen teklif satırı */
 .pop-row.bkl .pop-sub{color:var(--accent-ink);opacity:.8;}
+
+/* görevin işini değiştir düğmesi */
+.task .jobb{
+  opacity:0;flex:0 0 auto;color:var(--ink-3);padding:3px 4px;border-radius:4px;
+  display:inline-flex;align-items:center;transition:opacity .12s,color .12s,background .12s;
+}
+.task .jobb svg{width:15px;height:15px;fill:currentColor;}
+.task:hover .jobb,.task:focus-within .jobb{opacity:1;}
+.task .jobb:hover{color:var(--accent-ink);background:var(--accent-soft);}
+@media (hover:none){.task .jobb{opacity:.6;}}

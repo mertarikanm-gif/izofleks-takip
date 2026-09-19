@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20b";
+const APP_VERSION = "2026.09.20c";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -287,7 +287,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : jobLabelHtml(j)}<span class="tt">${esc(t.text)}${meta}</span></span>
-    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="pinb${t.pin ? ' on' : ''}" data-act="pin" data-id="${t.id}" aria-label="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}" aria-pressed="${t.pin ? 'true' : 'false'}" title="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}">${ICON_PIN}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
+    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="jobb" data-act="task-job" data-id="${t.id}" aria-label="İşi değiştir" title="İşi / başlığı değiştir">${ICON_LIST}</button><button class="pinb${t.pin ? ' on' : ''}" data-act="pin" data-id="${t.id}" aria-label="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}" aria-pressed="${t.pin ? 'true' : 'false'}" title="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}">${ICON_PIN}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
 
@@ -995,7 +995,7 @@ async function komutCoz(metin){
     'SADECE geçerli JSON döndür — açıklama, başlık, kod çiti (```) YAZMA. JSON\u2019dan sonra tek karakter bile olmasın.',
     'Kullanıcı tek cümlede BİRDEN FAZLA iş söylerse ( “şunu ve şunu” ) JSON DİZİSİ döndür: [{…},{…}]. Tek iş varsa tek nesne.',
     'Şema:',
-    '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"anlasilmadi",',
+    '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"is-degistir"|"anlasilmadi",',
     ' "isId":string|null,"gorevId":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,',
     ' "metin":string|null,"guven":0..1,"soru":string|null}',
     '',
@@ -1009,6 +1009,7 @@ async function komutCoz(metin){
     '- duzenle: görev metnini değiştir. metin = YENİ TAM METİN.',
     '    "şunu da ekle / notunu ekle" → eski metni aynen koru, sonuna ", <yeni>" ekleyip tam metni yaz.',
     '    "şunu çıkar" → o kısmı ayıklayıp kalan tam metni yaz.',
+    '- is-degistir: var olan görevi BAŞKA bir işe/başlığa taşı (“şunu tedarikçiye al”, “bunu muhasebeye taşı”, “mimarın işine bağla”). gorevId + isId zorunlu; gün değişmez.',
     '- anlasilmadi: emin değilsen. soru alanını doldur.',
     '',
     'KURALLAR:',
@@ -1051,8 +1052,9 @@ async function komutCoz(metin){
 }
 
 const ISLEM_AD = { ekle:'Ekle', tasi:'Taşı', sil:'Sil', bitti:'Bitti işaretle',
-  'geri-al':'Geri aç', sabitle:'Sabitle', 'sabit-kaldir':'Sabitten çıkar', duzenle:'Değiştir' };
-const HEDEF_ISLEM = ['tasi','sil','bitti','geri-al','sabitle','sabit-kaldir','duzenle'];
+  'geri-al':'Geri aç', sabitle:'Sabitle', 'sabit-kaldir':'Sabitten çıkar', duzenle:'Değiştir',
+  'is-degistir':'İşi değiştir' };
+const HEDEF_ISLEM = ['tasi','sil','bitti','geri-al','sabitle','sabit-kaldir','duzenle','is-degistir'];
 
 function komutSonuc(veri, ham){
   const dizi = komutDizi(veri);
@@ -1061,7 +1063,8 @@ function komutSonuc(veri, ham){
   V.sonuc = o;
   const islem = String(o.islem || '');
   const gecerli = (islem === 'ekle' && o.isId && o.metin)
-               || (HEDEF_ISLEM.includes(islem) && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
+               || (islem === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
+               || (HEDEF_ISLEM.includes(islem) && islem !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
   if (!gecerli){
     const soru = o.soru || 'Hangi iş için, hangi güne?';
     vSet('Soru', ham);
@@ -1092,7 +1095,8 @@ function komutCoklu(dizi, ham){
   const gecerliMi = o => {
     const i = String(o.islem || '');
     return (i === 'ekle' && o.isId && o.metin)
-        || (HEDEF_ISLEM.includes(i) && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
+        || (i === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
+        || (HEDEF_ISLEM.includes(i) && i !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
   };
   const iyi = dizi.filter(gecerliMi);
   if (!iyi.length){ komutSonuc(dizi[0] || {}, ham); return; }
@@ -1171,6 +1175,7 @@ function komutOzet(o){
         + sat('İş', j ? jobLabel(j) : '—');
   if (islem === 'tasi')    h += sat('Yeni gün', gunEtiket(o.gun, false)) + sat('Eski gün', gunEtiket(t.day, t.pin));
   if (islem === 'duzenle') h += sat('Yeni metin', o.metin || '');
+  if (islem === 'is-degistir') h += sat('Yeni iş', komutIsAdi(o)) + sat('Eski iş', j ? jobLabel(j) : '—');
   if (islem === 'sabitle') h += sat('Sonuç', 'sabit panele taşınır');
   if (islem === 'sabit-kaldir') h += sat('Sonuç', 'tarihsiz listeye döner');
   return h + '</div>';
@@ -1178,6 +1183,10 @@ function komutOzet(o){
 
 function komutIsAdi(o){
   { const g = genelListe().find(x => 'job:' + x.id === String(o.isId || '')); if (g) return g.ad; }
+  if (String(o.isId || '').startsWith('tkf:')){
+    const x = a42Teklif().find(z => 'tkf:' + z.id === o.isId);
+    if (x) return [x.musteri, x.proje].filter(Boolean).join(' · ');
+  }
   if (String(o.isId || '').startsWith('a42:')){
     const x = a42Devam().find(z => 'a42:' + z.is_id === o.isId);
     if (x) return [x.musteri, x.proje].filter(Boolean).join(' · ');
@@ -1188,13 +1197,21 @@ function komutIsAdi(o){
   return o.isAd || '—';
 }
 
-async function komutUygula(o, otomatik, sessiz){
-  const islem = String(o.islem || 'ekle');
-  if (islem !== 'ekle') return komutHedefUygula(o, islem, sessiz);
-
+/* isId → yerel iş kartı kimliği (kart yoksa açar) */
+async function komutIsCoz(o){
   const id = String(o.isId || '');
   let jobId = null;
-  if (id.startsWith('a42:')){
+  if (id.startsWith('tkf:')){
+    const tid = id.slice(4);
+    const x = a42Teklif().find(z => String(z.id) === tid);
+    jobId = tkfKimlik(tid);
+    if (!jobById(jobId)){
+      await S.store.setId('jobs', jobId, { customer: (x && x.musteri) || '', project: (x && x.proje) || '',
+        archived: false, a42Id: '', tkfId: tid, teklif: true,
+        ci: S.jobs.length % SWATCH.length, createdAt: Date.now() });
+      ensureContact(x && x.musteri);
+    }
+  } else if (id.startsWith('a42:')){
     const isId = id.slice(4);
     const v = S.jobs.find(j => String(j.a42Id || '') === isId);
     if (v) jobId = v.id;
@@ -1214,6 +1231,13 @@ async function komutUygula(o, otomatik, sessiz){
       } else jobId = null;
     }
   }
+  return jobId;
+}
+
+async function komutUygula(o, otomatik, sessiz){
+  const islem = String(o.islem || 'ekle');
+  if (islem !== 'ekle') return komutHedefUygula(o, islem, sessiz);
+  const jobId = await komutIsCoz(o);
   if (!jobId){ vSet('İş bulunamadı', V.metin); return; }
   const sabit = !!o.sabit;
   const gorevId = await S.store.add('tasks', { jobId, day: sabit ? '' : (o.gun || ''),
@@ -1252,6 +1276,13 @@ async function komutHedefUygula(o, islem, sessiz){
     if (!o.metin){ vSet('Yeni metin anlaşılmadı', V.metin); return; }
     await S.store.update('tasks', t.id, { text: o.metin });
     mesaj = 'Değiştirildi — ' + kisalt(o.metin);
+  } else if (islem === 'is-degistir'){
+    const yeni = await komutIsCoz(o);
+    if (!yeni){ vSet('İş bulunamadı', V.metin); return; }
+    await S.store.update('tasks', t.id, { jobId: yeni });
+    const jy = jobById(yeni);
+    mesaj = 'Taşındı — ' + (jy ? jobLabel(jy) : '');
+    geri = () => S.store.update('tasks', t.id, { jobId: eski.jobId });
   } else if (islem === 'sil'){
     await S.store.remove('tasks', t.id);
     mesaj = 'Silindi — ' + kisalt(eski.text);
@@ -1283,10 +1314,28 @@ function noteGeri(msg, geri){
 }
 
 /* ============ rehber penceresi ============ */
-function openPicker(type, btn){
+function openPicker(type, btn, gorev){
   const r = btn.getBoundingClientRect();
-  S.picker = { type, q: '', all: false, rect: { top: r.bottom, right: r.right, left: r.left } };
+  S.picker = { type, q: '', all: false, gorev: gorev || null,
+               rect: { top: r.bottom, right: r.right, left: r.left } };
   renderPicker();
+}
+
+/* Seçici bir görevden açıldıysa o görevin işini değiştir, değilse yeni görevin işini seç. */
+function secimUygula(jobId){
+  const gid = S.picker && S.picker.gorev;
+  if (gid){
+    const t = S.tasks.find(x => x.id === gid);
+    const eski = t ? t.jobId : null;
+    S.store.update('tasks', gid, { jobId });
+    closePicker();
+    render();
+    const j = jobById(jobId);
+    noteGeri('Taşındı — ' + (j ? jobLabel(j) : ''),
+             () => { if (eski) S.store.update('tasks', gid, { jobId: eski }); });
+    return;
+  }
+  secimUygula(jobId);
 }
 function closePicker(){
   S.picker = null;
@@ -1431,11 +1480,7 @@ async function genelChoose(id, ad, ci){
       archived: false, a42Id: '', ci: ci || 0, createdAt: Date.now() });
     note('Genel başlık açıldı — ' + (ad || 'Genel'));
   }
-  S.draft.job = id;
-  const t = document.getElementById('c-text');
-  if (t) S.draft.text = t.value;
-  closePicker();
-  render();
+  secimUygula(id);
 }
 
 /* A42 teklifini iş kartına bağla (yoksa aç). Sabit kimlik → tek kart. */
@@ -1448,11 +1493,7 @@ async function teklifChoose(tkfId, proje, musteri){
     ensureContact(musteri);
     note('Teklif kartı açıldı — ' + (proje || musteri));
   }
-  S.draft.job = id;
-  const t = document.getElementById('c-text');
-  if (t) S.draft.text = t.value;
-  closePicker();
-  render();
+  secimUygula(id);
 }
 
 async function jobChoose(jobId, proje, musteri, a42Id){
@@ -1476,11 +1517,7 @@ async function jobChoose(jobId, proje, musteri, a42Id){
     ensureContact(musteri);
     note('İş kartı açıldı — ' + (proje || musteri));
   }
-  S.draft.job = jobId;
-  const t = document.getElementById('c-text');
-  if (t) S.draft.text = t.value;
-  closePicker();
-  render();
+  secimUygula(jobId);
 }
 
 function pickerChoose(val, cust){
@@ -1773,6 +1810,7 @@ document.addEventListener('click', async (e) => {
   }
   if (a === 'open-job-form'){ S.tab = 'jobs'; S.composer = { scope: 'newjob', day: '' }; S.newJob = { customer: '', project: '' }; render(); return; }
   if (a === 'pick'){ openPicker(b.dataset.type, b); return; }
+  if (a === 'task-job'){ openPicker('job', b, id); return; }
   if (a === 'pop-close'){ closePicker(); return; }
   if (a === 'pop-all'){ if (S.picker){ S.picker.all = true; renderPicker(); } return; }
   if (a === 'pop-choose'){
