@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20c";
+const APP_VERSION = "2026.09.20d";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -781,6 +781,41 @@ function sesCevapla(){
   sesDinle();
 }
 
+/* ---- konuşma metni temizliği ----
+   Android Chrome'un tanıma motoru aynı parçayı birden çok kez döndürebiliyor.
+   Üç kat savunma: (1) sonuçları indeks ile tut, (2) birleştirirken örtüşmeyi kırp,
+   (3) yine de geçerse peş peşe tekrar eden kelime/öbekleri sil. */
+
+/* "PazartesiPazartesi" gibi kendi içinde tekrarlayan tek kelimeyi sadeleştir */
+function kelimeTekrari(w){
+  const L = w.length;
+  for (let n = 3; n <= L / 2; n++){
+    if (L % n) continue;
+    const p = w.slice(0, n);
+    if (p.repeat(L / n) === w) return p;
+  }
+  return w;
+}
+
+/* peş peşe tekrar eden kelime ve öbekleri tek sefere indir */
+function tekrarTemizle(t){
+  const k = String(t || '').trim().split(/\s+/).filter(Boolean).map(kelimeTekrari);
+  /* Hizadan bağımsız: her konumda "bu öbek hemen ardından aynen tekrar ediyor mu"
+     diye bak, ediyorsa ikinci kopyayı at, baştan tara. Üçlü tekrarları da temizler. */
+  let degisti = true, koruma = 0;
+  while (degisti && koruma++ < 60){
+    degisti = false;
+    for (let n = 1; n <= 6 && !degisti; n++){
+      for (let i = 0; i + 2 * n <= k.length; i++){
+        const a = k.slice(i, i + n).join(' ').toLocaleLowerCase('tr');
+        const b = k.slice(i + n, i + 2 * n).join(' ').toLocaleLowerCase('tr');
+        if (a === b){ k.splice(i + n, n); degisti = true; break; }
+      }
+    }
+  }
+  return k.join(' ');
+}
+
 /* İki metni örtüşmeyi tekrarlamadan birleştir.
    Motor yeniden başladığında aynı sesi bir daha yazıya çevirebiliyor —
    "PazartesiPazartesi için…" tekrarının sebebi buydu. */
@@ -800,37 +835,40 @@ function birlestir(a, b){
 
 let sesKesin = '';        /* önceki oturumlarda kesinleşmiş metin */
 
+/* Android Chrome'da continuous kipi aynı sonucu tekrar tekrar veriyor — orada kapalı çalış,
+   oturum kendiliğinden bitince yeniden başlat. Masaüstünde continuous sorunsuz. */
+const ANDROID = /Android/i.test(navigator.userAgent);
+
 function sesDinle(){
   const r = new SR();
   sesTanir = r;
-  let oturumKesin = '', gecici = '';
-  r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 1; r.continuous = true;
+  const kesinler = [];            /* indeks → kesinleşmiş parça (tekrar gelirse ÜZERİNE yazar) */
+  let gecici = '';
+  r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 1;
+  r.continuous = !ANDROID;
 
-  const yenile = () => {
-    sesSon = birlestir(sesKesin, birlestir(oturumKesin, gecici));
+  const oturumMetni = () => tekrarTemizle(kesinler.filter(Boolean).join(' ') + ' ' + gecici);
+
+  r.onresult = ev => {
+    gecici = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++){
+      const res = ev.results[i], par = (res[0] && res[0].transcript) || '';
+      if (res.isFinal) kesinler[i] = par;      /* eklemiyoruz — indekse yazıyoruz */
+      else gecici = par;
+    }
+    sesSon = tekrarTemizle(birlestir(sesKesin, oturumMetni()));
     V.metin = sesSon;
     vSet(null, sesSon);
   };
 
-  r.onresult = ev => {
-    let kes = '', gec = '';
-    for (let i = 0; i < ev.results.length; i++){
-      const par = ev.results[i][0].transcript;
-      if (ev.results[i].isFinal) kes = birlestir(kes, par);
-      else gec = birlestir(gec, par);
-    }
-    oturumKesin = kes; gecici = gec;
-    yenile();
-  };
-
-  const oturumuKapat = () => {                 /* bu oturumun kesin metnini biriktir */
-    sesKesin = birlestir(sesKesin, oturumKesin);
-    oturumKesin = ''; gecici = '';
+  const oturumuKapat = () => {
+    gecici = '';
+    sesKesin = tekrarTemizle(birlestir(sesKesin, tekrarTemizle(kesinler.filter(Boolean).join(' '))));
+    kesinler.length = 0;
     sesSon = sesKesin;
   };
 
   r.onerror = ev => {
-    /* no-speech: Chrome'un kendi sabırsızlığı — kullanıcı daha konuşmadıysa devam et */
     if (ev.error === 'no-speech' && !sesBitti && sesTur < SES_TUR){ return; }
     oturumuKapat();
     sesBitti = true; sesTanir = null;
@@ -849,8 +887,12 @@ function sesDinle(){
     oturumuKapat();
     sesTanir = null;
     if (!V.acik) return;
-    if (!sesBitti){                       /* motor kendi kapandı → sessizce devam */
-      if (sesTur < SES_TUR){ sesTur++; setTimeout(() => { if (!sesBitti && V.acik && !sesTanir) { try { sesDinle(); } catch(e){} } }, 200); return; }
+    if (!sesBitti){                       /* kullanıcı bitirmediyse dinlemeye devam */
+      if (sesTur < SES_TUR){
+        sesTur++;
+        setTimeout(() => { if (!sesBitti && V.acik && !sesTanir){ try { sesDinle(); } catch(e){} } }, 180);
+        return;
+      }
       sesBitti = true;
     }
     vEl().classList.remove('dinliyor');
@@ -977,6 +1019,7 @@ function komutDizi(veri){
 }
 
 async function komutCoz(metin){
+  metin = tekrarTemizle(metin);
   vSet('Komut çözülüyor…', metin);
   { const a = document.getElementById('v-acts');
     if (a) a.innerHTML = '<button class="btn" data-act="voice-close">Vazgeç</button>'; }
