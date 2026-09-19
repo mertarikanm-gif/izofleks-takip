@@ -112,7 +112,10 @@ button{cursor:pointer;background:none;border:none;padding:0;}
 @media (max-width:560px){
   .weekgrid{grid-template-columns:1fr;gap:8px;}
   .day{min-height:0;}
-  .day-b:empty{display:none;}
+  .day-b:empty{padding:2px 8px;min-height:0;}
+  /* sürükleme sırasında boş günler de hedef olsun */
+  body.dragging .day-b:empty{min-height:38px;}
+  body.dragging .day-b{min-height:38px;}
   .day-f{padding:8px;}
   .brand b{font-size:15.5px;}
 }

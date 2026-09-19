@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19c";
+const APP_VERSION = "2026.09.19d";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -931,6 +931,23 @@ function ordBetween(prev, next){
   return (a + b) / 2;
 }
 
+/* sürüklerken ekran kenarında otomatik kaydırma (telefonda 7 gün ekrana sığmıyor) */
+let scrollTimer = null;
+function autoScroll(y){
+  const esik = 90, hiz = 14;
+  const h = window.innerHeight;
+  let yon = 0;
+  if (y < esik) yon = -1;
+  else if (y > h - esik) yon = 1;
+  if (!yon){ if (scrollTimer){ clearInterval(scrollTimer); scrollTimer = null; } return; }
+  if (scrollTimer) return;
+  scrollTimer = setInterval(() => {
+    if (!drag){ clearInterval(scrollTimer); scrollTimer = null; return; }
+    window.scrollBy(0, yon * hiz);
+  }, 16);
+}
+function stopScroll(){ if (scrollTimer){ clearInterval(scrollTimer); scrollTimer = null; } }
+
 function dropIndicator(box, y){
   document.querySelectorAll('.dropline').forEach(n => n.remove());
   const line = document.createElement('div');
@@ -976,7 +993,13 @@ document.addEventListener('pointermove', e => {
   drag.ghost.hidden = true;
   const under = document.elementFromPoint(e.clientX, e.clientY);
   drag.ghost.hidden = false;
-  const box = under && under.closest('[data-drop]');
+  // doğrudan bırakma alanı; olmazsa gün kartının herhangi bir yeri de kabul
+  let box = under && under.closest('[data-drop]');
+  if (!box && under){
+    const kart = under.closest('.day');
+    if (kart) box = kart.querySelector('[data-drop]');
+  }
+  autoScroll(e.clientY);
   document.querySelectorAll('[data-drop].dropon').forEach(n => n.classList.remove('dropon'));
   if (box){ box.classList.add('dropon'); dropIndicator(box, e.clientY); }
   else { document.querySelectorAll('.dropline').forEach(n => n.remove()); drag.box = null; }
@@ -985,6 +1008,7 @@ document.addEventListener('pointermove', e => {
 function endDrag(apply){
   if (!drag) return;
   const d = drag; drag = null;
+  stopScroll();
   d.ghost?.remove();
   d.el.classList.remove('dragsrc');
   document.body.classList.remove('dragging');
