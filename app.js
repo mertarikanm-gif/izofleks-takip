@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19e";
+const APP_VERSION = "2026.09.19f";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -931,6 +931,25 @@ function ordBetween(prev, next){
   return (a + b) / 2;
 }
 
+/* Bırakma hedefini geometriyle bul: parmağın tam bırakma şeridinin üstünde
+   olması gerekmesin — gün kartının herhangi bir yeri, hatta yakını yeter. */
+function hedefBul(x, y){
+  const liste = [...document.querySelectorAll('[data-drop]')].map(box => ({
+    box, r: (box.closest('.day') || box).getBoundingClientRect()
+  })).filter(t => t.r.width > 0 && t.r.height > 0);
+  for (const t of liste){
+    if (x >= t.r.left && x <= t.r.right && y >= t.r.top && y <= t.r.bottom) return t.box;
+  }
+  let en = null, mesafe = Infinity;
+  for (const t of liste){
+    const dx = x < t.r.left ? t.r.left - x : x > t.r.right ? x - t.r.right : 0;
+    const dy = y < t.r.top ? t.r.top - y : y > t.r.bottom ? y - t.r.bottom : 0;
+    const d = Math.hypot(dx, dy);
+    if (d < mesafe){ mesafe = d; en = t.box; }
+  }
+  return mesafe <= 70 ? en : null;
+}
+
 /* sürüklerken ekran kenarında otomatik kaydırma (telefonda 7 gün ekrana sığmıyor) */
 let scrollTimer = null;
 function autoScroll(y){
@@ -990,15 +1009,7 @@ document.addEventListener('pointermove', e => {
   }
   drag.ghost.style.left = (e.clientX - drag.dx) + 'px';
   drag.ghost.style.top  = (e.clientY - drag.dy) + 'px';
-  drag.ghost.hidden = true;
-  const under = document.elementFromPoint(e.clientX, e.clientY);
-  drag.ghost.hidden = false;
-  // doğrudan bırakma alanı; olmazsa gün kartının herhangi bir yeri de kabul
-  let box = under && under.closest('[data-drop]');
-  if (!box && under){
-    const kart = under.closest('.day');
-    if (kart) box = kart.querySelector('[data-drop]');
-  }
+  const box = hedefBul(e.clientX, e.clientY);
   autoScroll(e.clientY);
   document.querySelectorAll('[data-drop].dropon').forEach(n => n.classList.remove('dropon'));
   if (box){ box.classList.add('dropon'); dropIndicator(box, e.clientY); }
