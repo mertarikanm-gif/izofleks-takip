@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20d";
+const APP_VERSION = "2026.09.20e";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -93,6 +93,7 @@ const S = {
   draft: { text: '', job: '', day: '' },
   newJob: { customer: '', project: '' },
   picker: null,          // { type:'customer'|'project', q:'', rect:{...} }
+  edit: null,            // düzenlenen görev taslağı { id, text, jobId, day, pin }
   store: null,
   unsub: [],
   auth: null,          // firebase auth nesnesi (bulut modda)
@@ -255,6 +256,9 @@ const ICON_LIST = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"
   <rect x="8" y="9.25" width="8.5" height="1.5" rx=".75"/>
   <rect x="8" y="13.75" width="8.5" height="1.5" rx=".75"/></svg>`;
 
+const ICON_EDIT = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M13.4 3.6a1.7 1.7 0 0 1 2.4 2.4L7.3 14.5 4 15.5l1-3.3z"/><path d="M12.2 4.8 14.6 7.2"/></svg>`;
+
 const ICON_PIN = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M11.8 2.6 17.4 8.2l-2.3.7a2 2 0 0 0-1 .6l-2.4 2.8-3.9-3.9 2.8-2.4a2 2 0 0 0 .6-1z"/>
   <path d="M7.8 12.2 3.4 16.6"/></svg>`;
@@ -287,7 +291,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : jobLabelHtml(j)}<span class="tt">${esc(t.text)}${meta}</span></span>
-    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="jobb" data-act="task-job" data-id="${t.id}" aria-label="İşi değiştir" title="İşi / başlığı değiştir">${ICON_LIST}</button><button class="pinb${t.pin ? ' on' : ''}" data-act="pin" data-id="${t.id}" aria-label="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}" aria-pressed="${t.pin ? 'true' : 'false'}" title="${t.pin ? 'Sabitten çıkar' : 'Sabitle'}">${ICON_PIN}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
+    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="editb" data-act="task-edit" data-id="${t.id}" aria-label="Düzenle" title="Düzenle">${ICON_EDIT}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
 
@@ -723,22 +727,8 @@ let sesBitti = false, sesSon = '', sesTur = 0;
 let sesGecmis = [];      /* Claude'a giden konuşma geçmişi */
 let soruTur = 0;         /* kaçıncı soru-cevap turu */
 
-/* Soruyu sesli oku, bitince dinlemeye geç (eller meşgulken asıl işe yarayan kısım) */
-function konus(metin, bitince){
-  const devam = () => { try { bitince && bitince(); } catch(e){} };
-  if (!metin || !('speechSynthesis' in window)){ devam(); return; }
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(metin);
-    u.lang = 'tr-TR'; u.rate = 1.05;
-    let acildi = false;
-    const bir = () => { if (acildi) return; acildi = true; devam(); };
-    u.onend = bir; u.onerror = bir;
-    setTimeout(bir, Math.min(9000, 1800 + metin.length * 75));   /* ses motoru takılırsa bekletme */
-    speechSynthesis.speak(u);
-  } catch(e){ devam(); }
-}
-function susturKonus(){ try { speechSynthesis.cancel(); } catch(e){} }
+/* Program sesli cevap vermez — soruyu yazıyla gösterir, sonra dinlemeye geçer. */
+function susturKonus(){ try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch(e){} }
 
 /* Konuşmayı yalnızca kullanıcı bitirir — otomatik kapanma yok. */
 function sesBitir(){
@@ -1116,7 +1106,7 @@ function komutSonuc(veri, ham){
       '<button class="btn primary" data-act="voice-cevap">&#127908; Cevapla</button>' +
       '<button class="btn" data-act="mic">Baştan söyle</button>' +
       '<button class="btn ghost" data-act="voice-close">Kapat</button>';
-    soruSor(soru);
+    soruSor();
     return;
   }
   const guven = +o.guven || 0;
@@ -1130,7 +1120,7 @@ function komutSonuc(veri, ham){
     `<button class="btn primary${islem === 'sil' ? ' tehlike' : ''}" data-act="voice-ok">${esc(ISLEM_AD[islem] || 'Uygula')}</button>` +
     '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
-  soruSor(soru, komutSesOzet(o));
+  soruSor();
 }
 
 /* Birden fazla komut: hepsini özetle, tek onayla uygula */
@@ -1160,7 +1150,7 @@ function komutCoklu(dizi, ham){
     `<button class="btn primary${silVar ? ' tehlike' : ''}" data-act="voice-coklu">${iyi.length} işlemi uygula</button>` +
     '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
-  soruSor(iyi.length + ' işlem yapılacak. Onaylıyor musun?');
+  soruSor();
 }
 
 async function komutCokluUygula(){
@@ -1176,27 +1166,18 @@ async function komutCokluUygula(){
 }
 
 /* Soruyu sesli oku, sonra kendiliğinden dinlemeye geç */
-function soruSor(soru, onek){
+/* Soru ekranda YAZIYLA durur; kısa bir beklemeden sonra cevabı dinlemeye geçer. */
+function soruSor(){
   soruTur++;
   if (soruTur > SORU_TUR) return;                 /* döngüye girmesin */
-  konus((onek ? onek + '. ' : '') + soru, () => {
-    if (!V.acik) return;                          /* pencere kapandıysa dinleme */
-    if (!document.querySelector('[data-act="voice-cevap"]')) return;   /* başka ekrana geçildi */
+  setTimeout(() => {
+    if (!V.acik) return;
+    if (!document.querySelector('[data-act="voice-cevap"]')) return;
     sesCevapla();
-  });
+  }, 700);
 }
 
 /* Onay ekranında sesle okunacak kısa özet */
-function komutSesOzet(o){
-  const islem = String(o.islem || '');
-  if (islem === 'ekle') return komutIsAdi(o) + ', ' + gunEtiket(o.gun, o.sabit) + ', ' + (o.metin || '');
-  const t = S.tasks.find(x => x.id === o.gorevId);
-  if (!t) return '';
-  if (islem === 'tasi') return t.text + ', ' + gunEtiket(o.gun, false) + '\u2019e ta\u015f\u0131nacak';
-  if (islem === 'sil')  return t.text + ' silinecek';
-  if (islem === 'duzenle') return 'yeni metin: ' + (o.metin || '');
-  return t.text;
-}
 
 function gunEtiket(gun, sabit){
   if (sabit) return 'sabit (takvim dışı)';
@@ -1356,6 +1337,78 @@ function noteGeri(msg, geri){
   setTimeout(() => t.remove(), 7000);
 }
 
+/* ============ görev düzenleme penceresi ============ */
+function editAc(id){
+  const t = S.tasks.find(x => x.id === id);
+  if (!t) return;
+  S.edit = { id, text: t.text || '', jobId: t.jobId || '', day: t.day || '', pin: !!t.pin, done: !!t.done };
+  editCiz();
+}
+function editKapat(){ S.edit = null; document.getElementById('edit-back')?.remove(); document.getElementById('editw')?.remove(); }
+
+function editCiz(){
+  document.getElementById('edit-back')?.remove();
+  document.getElementById('editw')?.remove();
+  const e = S.edit; if (!e) return;
+  const j = jobById(e.jobId);
+  const back = document.createElement('div'); back.id = 'edit-back'; back.dataset.act = 'edit-kapat';
+  const w = document.createElement('div'); w.id = 'editw'; w.className = 'editw';
+  w.setAttribute('role', 'dialog'); w.setAttribute('aria-label', 'Görevi düzenle');
+  w.innerHTML = `
+    <div class="ed-h"><b>Görevi düzenle</b><button class="pop-x" data-act="edit-kapat" aria-label="Kapat">×</button></div>
+    <div class="ed-b">
+      <label class="ed-l" for="e-text">Görev</label>
+      <textarea id="e-text" rows="2" placeholder="Ne yapılacak?">${esc(e.text)}</textarea>
+
+      <label class="ed-l">İş / başlık</label>
+      <button type="button" class="jobpick${j ? '' : ' bos'}" data-act="edit-is">
+        <span class="jp-nm">${j ? esc(jobLabel(j)) : 'İş / proje seç…'}</span>${ICON_LIST}</button>
+
+      <label class="ed-l">Ne zaman</label>
+      <div class="ed-row">
+        <input type="date" id="e-day" value="${esc(e.pin ? '' : e.day)}" ${e.pin ? 'disabled' : ''} aria-label="Gün">
+        <button class="btn" data-act="edit-tarihsiz" ${e.pin ? 'disabled' : ''}>Tarihsiz</button>
+      </div>
+      <div class="ed-row">
+        <button class="btn${e.pin ? ' primary' : ''}" data-act="edit-sabit" aria-pressed="${e.pin}">
+          ${e.pin ? '✓ Sabit (takvim dışı)' : 'Sabitle'}</button>
+        <button class="btn${e.done ? ' primary' : ''}" data-act="edit-bitti" aria-pressed="${e.done}">
+          ${e.done ? '✓ Bitti' : 'Bitti işaretle'}</button>
+      </div>
+    </div>
+    <div class="ed-f">
+      <button class="btn primary" data-act="edit-kaydet">Kaydet</button>
+      <button class="btn" data-act="edit-kapat">Vazgeç</button>
+      <button class="btn ghost ed-sil" data-act="edit-sil">Sil</button>
+    </div>`;
+  document.body.appendChild(back);
+  document.body.appendChild(w);
+  const ta = document.getElementById('e-text');
+  if (ta){ ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch(err){} }
+}
+
+function editTopla(){
+  if (!S.edit) return;
+  const ta = document.getElementById('e-text'); if (ta) S.edit.text = ta.value;
+  const de = document.getElementById('e-day'); if (de && !S.edit.pin) S.edit.day = de.value || '';
+}
+
+function editKaydet(){
+  editTopla();
+  const e = S.edit; if (!e) return;
+  const t = S.tasks.find(x => x.id === e.id);
+  if (!t){ editKapat(); return; }
+  const metin = (e.text || '').trim();
+  if (!metin){ note('Görev metni boş olamaz.'); return; }
+  if (!e.jobId || !jobById(e.jobId)){ note('Önce bir iş / başlık seçin.'); return; }
+  const eski = { text: t.text || '', jobId: t.jobId, day: t.day || '', pin: !!t.pin, done: !!t.done };
+  S.store.update('tasks', e.id, { text: metin, jobId: e.jobId,
+    day: e.pin ? '' : (e.day || ''), pin: !!e.pin, done: !!e.done });
+  editKapat();
+  render();
+  noteGeri('Güncellendi — ' + kisalt(metin), () => S.store.update('tasks', e.id, eski));
+}
+
 /* ============ rehber penceresi ============ */
 function openPicker(type, btn, gorev){
   const r = btn.getBoundingClientRect();
@@ -1366,6 +1419,7 @@ function openPicker(type, btn, gorev){
 
 /* Seçici bir görevden açıldıysa o görevin işini değiştir, değilse yeni görevin işini seç. */
 function secimUygula(jobId){
+  if (S.edit){ S.edit.jobId = jobId; closePicker(); editCiz(); return; }
   const gid = S.picker && S.picker.gorev;
   if (gid){
     const t = S.tasks.find(x => x.id === gid);
@@ -1853,7 +1907,24 @@ document.addEventListener('click', async (e) => {
   }
   if (a === 'open-job-form'){ S.tab = 'jobs'; S.composer = { scope: 'newjob', day: '' }; S.newJob = { customer: '', project: '' }; render(); return; }
   if (a === 'pick'){ openPicker(b.dataset.type, b); return; }
-  if (a === 'task-job'){ openPicker('job', b, id); return; }
+  if (a === 'task-edit'){ editAc(id); return; }
+  if (a === 'edit-kapat'){ editKapat(); return; }
+  if (a === 'edit-kaydet'){ editKaydet(); return; }
+  if (a === 'edit-is'){ editTopla(); openPicker('job', b); return; }
+  if (a === 'edit-tarihsiz'){ editTopla(); S.edit.day = ''; editCiz(); return; }
+  if (a === 'edit-sabit'){ editTopla(); S.edit.pin = !S.edit.pin; if (S.edit.pin) S.edit.day = ''; editCiz(); return; }
+  if (a === 'edit-bitti'){ editTopla(); S.edit.done = !S.edit.done; editCiz(); return; }
+  if (a === 'edit-sil'){
+    const e = S.edit; if (!e) return;
+    const t = S.tasks.find(x => x.id === e.id);
+    if (!t) { editKapat(); return; }
+    if (!confirm('“' + kisalt(t.text) + '” silinsin mi?')) return;
+    const yedek = { jobId: t.jobId, day: t.day || '', text: t.text || '', done: !!t.done, pin: !!t.pin, ord: t.ord, createdAt: t.createdAt };
+    S.store.remove('tasks', e.id);
+    editKapat(); render();
+    noteGeri('Silindi — ' + kisalt(yedek.text), () => S.store.add('tasks', yedek));
+    return;
+  }
   if (a === 'pop-close'){ closePicker(); return; }
   if (a === 'pop-all'){ if (S.picker){ S.picker.all = true; renderPicker(); } return; }
   if (a === 'pop-choose'){

@@ -560,3 +560,44 @@ html,body{overscroll-behavior-x:contain;}
 .task:hover .jobb,.task:focus-within .jobb{opacity:1;}
 .task .jobb:hover{color:var(--accent-ink);background:var(--accent-soft);}
 @media (hover:none){.task .jobb{opacity:.6;}}
+
+/* ============ görev düzenleme penceresi ============ */
+#edit-back{position:fixed;inset:0;z-index:88;background:rgba(10,14,17,.42);}
+.editw{
+  position:fixed;z-index:89;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(420px,calc(100vw - 24px));max-height:calc(100vh - 48px);
+  background:var(--panel);border:1px solid var(--line-2);border-radius:14px;
+  box-shadow:0 2px 8px rgba(19,24,28,.12), 0 24px 56px -22px rgba(19,24,28,.6);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.editw .ed-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel-2);}
+.editw .ed-h b{flex:1;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:600;}
+.editw .ed-b{padding:12px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;}
+.editw .ed-l{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-top:6px;}
+.editw textarea,.editw input[type="date"]{
+  width:100%;border:1px solid var(--line-2);background:var(--panel);border-radius:8px;
+  padding:9px;font:inherit;font-size:13.5px;resize:vertical;
+}
+.editw .ed-row{display:flex;gap:6px;flex-wrap:wrap;}
+.editw .ed-row .btn{flex:1 1 auto;padding:8px 10px;}
+.editw .ed-row input[type="date"]{flex:1 1 150px;width:auto;}
+.editw .jobpick{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  border:1px solid var(--line-2);background:var(--panel);border-radius:8px;padding:9px;font-size:13.5px;color:var(--ink);}
+.editw .jobpick:hover{border-color:var(--accent);background:var(--accent-soft);}
+.editw .jobpick.bos .jp-nm{color:var(--ink-3);}
+.editw .jobpick .jp-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.editw .jobpick svg{width:16px;height:16px;flex:0 0 auto;color:var(--ink-3);}
+.editw .ed-f{display:flex;gap:6px;padding:10px 14px;border-top:1px solid var(--line);background:var(--panel-2);}
+.editw .ed-f .btn{flex:1;}
+.editw .ed-sil{flex:0 0 auto;color:var(--warn);}
+.editw .ed-sil:hover{background:var(--warn-soft);}
+
+/* düzenle düğmesi */
+.task .editb{
+  opacity:0;flex:0 0 auto;color:var(--ink-3);padding:3px 4px;border-radius:4px;
+  display:inline-flex;align-items:center;transition:opacity .12s,color .12s,background .12s;
+}
+.task .editb svg{width:15px;height:15px;}
+.task:hover .editb,.task:focus-within .editb{opacity:1;}
+.task .editb:hover{color:var(--accent-ink);background:var(--accent-soft);}
+@media (hover:none){.task .editb{opacity:.6;}}
