@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19y";
+const APP_VERSION = "2026.09.19z";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -956,7 +956,12 @@ async function komutCoz(metin){
     'KURALLAR:',
     '- isId: İŞ LİSTESİ’nden EN İYİ eşleşen id; eşleşme yoksa null ve guven düşük.',
     '- gorevId: MEVCUT GÖREVLER listesinden EN İYİ eşleşen id. Birden fazla görev aynı derecede uyuyorsa "anlasilmadi" dön ve soru ile hangisi olduğunu sor — rastgele seçme.',
-    '- Müşteri sütunu GENEL olanlar projeden bağımsız başlıklardır. Komutta mimar/proje geçmiyorsa (fatura, muhasebe, vergi, SGK, ofis işi, tedarikçi, kişisel hatırlatma) bunlardan uygun olanı seç — proje uydurma.',
+    '- Müşteri sütunu GENEL olanlar projeden bağımsız başlıklardır. Komutta mimar/proje geçmiyorsa bunlardan uygun olanı seç — proje uydurma. Hangisi ne kapsar:',
+    '    Muhasebe: fatura, vergi, beyanname, SGK, ödeme, kar payı, mali müşavir.',
+    '    Ofis / İdari: ofis işleri, evrak, kırtasiye, araç, resmî yazışma.',
+    '    Tedarikçi: tedarikçi arama, fiyat isteme, sipariş takibi, taşeron.',
+    '    Kişisel: kişisel hatırlatmalar.',
+    '    Dijital: web sitesi, Wix, reklam/tanıtım mailleri, sosyal medya, katalog dijital işleri VE yazılım tarafı — uygulama (app), A42 widget, yapay zeka / AI ile ilgili her iş.',
     '- gun: tarih anlaşılmadıysa null.',
     '- sabit: "sabit", "sabitle", "pinle" geçiyorsa true; görev takvime girmez, gun null olur.',
     '- metin: kısa Türkçe açıklama, komut kalıbı olmadan (örn. "boya yapılacak").',
