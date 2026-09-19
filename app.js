@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19f";
+const APP_VERSION = "2026.09.19g";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -981,23 +981,50 @@ function dropIndicator(box, y){
   drag.box = box; drag.before = before;
 }
 
+/* Kartın tamamı sürüklenir.
+   · şerit (tutamaç) veya fare  → hemen sürükleme
+   · kart gövdesi + dokunma     → 280 ms basılı tut, sonra sürükleme
+     (böylece parmakla sayfayı kaydırmak da çalışmaya devam eder) */
+const TIKLANIR = 'button, a, input, select, textarea, label, [contenteditable]';
+const BASILI_TUT = 280;
+
 document.addEventListener('pointerdown', e => {
-  const h = e.target.closest('[data-drag]');
-  if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
-  const el = h.closest('.task');
-  const id = h.dataset.drag;
-  if (!el || !id) return;
-  e.preventDefault();
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  if (e.target.closest(TIKLANIR)) return;
+  const h  = e.target.closest('[data-drag]');
+  const el = e.target.closest('.task');
+  if (!el) return;
+  const id = el.dataset.id || (h && h.dataset.drag);
+  if (!id) return;
   const r = el.getBoundingClientRect();
-  drag = { id, el, h, x0: e.clientX, y0: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top,
-           w: r.width, on: false, ghost: null, box: null, before: null };
-  try { h.setPointerCapture(e.pointerId); } catch(err){}
+  drag = { id, el, h: h || el, x0: e.clientX, y0: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top,
+           w: r.width, on: false, hazir: false, ghost: null, box: null, before: null, timer: null };
+  if (h || e.pointerType !== 'touch'){
+    drag.hazir = true;
+    e.preventDefault();
+    try { (h || el).setPointerCapture(e.pointerId); } catch(err){}
+  } else {
+    drag.timer = setTimeout(() => {
+      if (!drag) return;
+      drag.hazir = true;
+      drag.el.classList.add('pressready');
+      try { navigator.vibrate && navigator.vibrate(12); } catch(err){}
+    }, BASILI_TUT);
+  }
 });
+
+/* sürükleme başladıysa sayfa kaymasın */
+document.addEventListener('touchmove', e => { if (drag && drag.on) e.preventDefault(); }, { passive: false });
 
 document.addEventListener('pointermove', e => {
   if (!drag) return;
+  const uzaklik = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0);
+  if (!drag.hazir){
+    if (uzaklik > 8){ clearTimeout(drag.timer); drag = null; }   // kaydırma niyeti
+    return;
+  }
   if (!drag.on){
-    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;
+    if (uzaklik < 5) return;
     drag.on = true;
     const g = drag.el.cloneNode(true);
     g.className = 'task dragghost';
@@ -1019,9 +1046,11 @@ document.addEventListener('pointermove', e => {
 function endDrag(apply){
   if (!drag) return;
   const d = drag; drag = null;
+  clearTimeout(d.timer);
   stopScroll();
   d.ghost?.remove();
   d.el.classList.remove('dragsrc');
+  d.el.classList.remove('pressready');
   document.body.classList.remove('dragging');
   document.querySelectorAll('.dropline').forEach(n => n.remove());
   document.querySelectorAll('[data-drop].dropon').forEach(n => n.classList.remove('dropon'));
