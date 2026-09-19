@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20g";
+const APP_VERSION = "2026.09.20h";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -1174,7 +1174,7 @@ function komutSonuc(veri, ham){
     `<button class="btn primary${islem === 'sil' ? ' tehlike' : ''}" data-act="voice-ok">${esc(ISLEM_AD[islem] || 'Uygula')}</button>` +
     '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
-  soruSor();
+  /* onay ekranında kendiliğinden dinlemeye GEÇMİYORUZ — düğmeler kaybolmasın */
 }
 
 /* Birden fazla komut: hepsini özetle, tek onayla uygula */
@@ -1205,7 +1205,7 @@ function komutCoklu(dizi, ham){
     `<button class="btn primary${silVar ? ' tehlike' : ''}" data-act="voice-coklu">${iyi.length} işlemi uygula</button>` +
     '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
-  soruSor();
+  /* onay ekranında kendiliğinden dinlemeye GEÇMİYORUZ — düğmeler kaybolmasın */
 }
 
 async function komutCokluUygula(){
@@ -1231,7 +1231,8 @@ function yazDuzeltHtml(ham){
     </div></div>`;
 }
 
-/* Soru ekranda YAZIYLA durur; kısa bir beklemeden sonra cevabı dinlemeye geçer. */
+/* Sadece SORU ekranında (basılacak karar düğmesi yokken) kendiliğinden dinlemeye geçer.
+   Onay ekranlarında geçmez; orada karar düğmesi ya da 🎤 Cevapla var. */
 function soruSor(){
   soruTur++;
   if (soruTur > SORU_TUR) return;                 /* döngüye girmesin */
