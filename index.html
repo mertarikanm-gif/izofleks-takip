@@ -70,12 +70,28 @@
       <button id="tab-jobs" role="tab" aria-selected="false" data-act="tab" data-v="jobs">İşler</button>
     </div>
     <button class="btn install" id="install" hidden data-act="install">Ana ekrana ekle</button>
+    <button class="micbtn" id="mic" data-act="mic" title="Sesli komut" aria-label="Sesli komut">
+      <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <rect x="7.25" y="2.25" width="5.5" height="9.5" rx="2.75"/>
+        <path d="M4.5 9.2a5.5 5.5 0 0 0 11 0"/><path d="M10 14.7V17.5"/><path d="M7.2 17.6h5.6"/>
+      </svg><span class="mt">Sesli</span>
+    </button>
     <button class="sync" id="sync" data-act="account" title="Hesap / senkron"><span class="dot off"></span><span id="sync-t">başlatılıyor</span></button>
   </div>
 </div>
 
 <div class="wrap">
   <main id="main"></main>
+</div>
+
+<div class="voice" id="voice" hidden>
+  <div class="voice-card" role="dialog" aria-modal="true" aria-label="Sesli komut">
+    <div class="vwave" id="v-wave"><i></i><i></i><i></i><i></i><i></i></div>
+    <p class="vstate" id="v-state">Dinleniyor…</p>
+    <p class="vtext" id="v-text"></p>
+    <div id="v-body"></div>
+    <div class="row" id="v-acts"><button class="btn" data-act="voice-close">Kapat</button></div>
+  </div>
 </div>
 
 <div class="sheet" id="sheet" hidden>

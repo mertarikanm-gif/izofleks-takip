@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19n";
+const APP_VERSION = "2026.09.19o";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -574,6 +574,223 @@ async function loadA42(yumusak){
   renderPicker();
 }
 
+
+/* ============ sesli komut ============
+   1) Tarayıcının tr-TR konuşma tanıması metne çevirir
+   2) Metin Claude'a gider, JSON komut döner
+   3) Güven yüksekse doğrudan uygulanır, değilse onay istenir
+   API anahtarı kodda değil — hesabın altında (settings) saklanır. */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const sesDestek = () => !!SR;
+let sesTanir = null;
+const V = { acik:false, durum:'', metin:'', sonuc:null, sorgu:false };
+
+const vEl  = () => document.getElementById('voice');
+const vSet = (durum, metin) => {
+  const d = document.getElementById('v-state'), t = document.getElementById('v-text');
+  if (d && durum != null) d.textContent = durum;
+  if (t && metin != null) t.textContent = metin;
+};
+
+function voiceAc(){
+  V.acik = true; V.metin = ''; V.sonuc = null;
+  vEl().hidden = false;
+  document.getElementById('v-body').innerHTML = '';
+  document.getElementById('v-acts').innerHTML = '<button class="btn" data-act="voice-close">Vazgeç</button>';
+  vEl().classList.add('dinliyor');
+  vSet('Dinleniyor…', '');
+}
+function voiceKapat(){
+  V.acik = false;
+  try { sesTanir && sesTanir.abort(); } catch(e){}
+  sesTanir = null;
+  const e = vEl(); if (e){ e.hidden = true; e.classList.remove('dinliyor'); }
+}
+
+function sesBaslat(){
+  if (!sesDestek()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor (Chrome gerekir).'); return; }
+  if (!getSetting('claudekey')){ note('Önce senkron penceresinden Claude API anahtarını girin.'); openSheet(); return; }
+  if (sesTanir){ try { sesTanir.stop(); } catch(e){} return; }
+  voiceAc();
+  const r = new SR();
+  sesTanir = r;
+  r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 1; r.continuous = false;
+  let son = '';
+  r.onresult = ev => {
+    let t = '';
+    for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript;
+    son = t.trim(); V.metin = son;
+    vSet(null, son);
+  };
+  r.onerror = ev => {
+    sesTanir = null;
+    vEl().classList.remove('dinliyor');
+    const m = { 'not-allowed':'Mikrofon izni verilmedi.', 'service-not-allowed':'Mikrofon izni verilmedi.',
+                'no-speech':'Ses algılanmadı.', 'audio-capture':'Mikrofon bulunamadı.',
+                'network':'İnternet bağlantısı gerekiyor.' }[ev.error] || ('Ses hatası: ' + ev.error);
+    vSet(m, son);
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
+  };
+  r.onend = () => {
+    sesTanir = null;
+    vEl().classList.remove('dinliyor');
+    if (!V.acik) return;
+    if (!son){ vSet('Bir şey duyamadım.', '');
+      document.getElementById('v-acts').innerHTML =
+        '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
+      return; }
+    komutCoz(son);
+  };
+  try { r.start(); } catch(e){ note('Mikrofon başlatılamadı.'); voiceKapat(); }
+}
+
+/* --- Claude --- */
+const AI_URL = 'https://api.anthropic.com/v1/';
+async function aiFetch(yol, govde){
+  const key = getSetting('claudekey');
+  if (!key) throw new Error('API anahtarı yok');
+  const o = { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01',
+              'anthropic-dangerous-direct-browser-access': 'true' } };
+  if (govde){ o.method = 'POST'; o.headers['content-type'] = 'application/json'; o.body = JSON.stringify(govde); }
+  const r = await fetch(AI_URL + yol, o);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  return j;
+}
+async function aiModelSec(){
+  const j = await aiFetch('models?limit=40');
+  const ids = (j.data || []).map(m => m.id);
+  const m = ids.find(x => /haiku/.test(x)) || ids.find(x => /sonnet/.test(x)) || ids[0];
+  if (!m) throw new Error('Model listesi boş');
+  return m;
+}
+
+function aiIsListesi(){
+  const L = [];
+  a42Devam().forEach(x => L.push({ id: 'a42:' + x.is_id, m: x.musteri || '', p: x.proje || '' }));
+  S.jobs.filter(j => !j.archived).forEach(j => L.push({ id: 'job:' + j.id, m: j.customer || '', p: j.project || '' }));
+  return L.slice(0, 60);
+}
+
+async function komutCoz(metin){
+  vSet('Komut çözülüyor…', metin);
+  const bugun = new Date();
+  const isler = aiIsListesi();
+  const sistem = [
+    'Bir Türk alüminyum doğrama firmasının iş takip uygulaması için sesli komutları JSON\'a çeviriyorsun.',
+    'BUGÜN: ' + iso(bugun) + ' (' + DAY_FULL[(bugun.getDay() + 6) % 7] + ').',
+    'Hafta Pazartesi başlar. "önümüzdeki <gün>" = bu haftadan SONRAKİ haftanın o günü. "bu <gün>" = içinde bulunulan haftanın o günü. "yarın", "öbür gün", "haftaya" da desteklenir.',
+    'İŞ LİSTESİ (id | müşteri | proje):',
+    isler.map(x => x.id + ' | ' + x.m + ' | ' + x.p).join('\n'),
+    '',
+    'SADECE şu şemada geçerli JSON döndür, başka hiçbir şey yazma:',
+    '{"islem":"gorev-ekle"|"anlasilmadi","isId":string|null,"isAd":string|null,"gun":"YYYY-MM-DD"|null,"metin":string|null,"guven":0..1,"soru":string|null}',
+    '- isId: listeden EN İYİ eşleşen id. Eşleşme yoksa null ve guven düşük olsun.',
+    '- gun: tarih anlaşılmadıysa null (görev tarihsiz eklenir).',
+    '- metin: yapılacak işin kısa açıklaması, Türkçe, komut kalıbı olmadan (örn. "boya yapılacak").',
+    '- guven: iş eşleşmesi + tarih birlikte ne kadar kesinse. Emin değilsen 0.7 altında ver.',
+    '- soru: guven düşükse kullanıcıya sorulacak tek cümlelik soru, değilse null.'
+  ].join('\n');
+
+  try {
+    let model = getSetting('claudemodel');
+    if (!model){ model = await aiModelSec(); await setSetting('claudemodel', model); }
+    const j = await aiFetch('messages', {
+      model, max_tokens: 400, system: sistem,
+      messages: [{ role: 'user', content: metin }]
+    });
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Yanıt okunamadı');
+    komutSonuc(JSON.parse(m[0]), metin);
+  } catch(e){
+    vSet('Çözülemedi: ' + e.message, metin);
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
+  }
+}
+
+function komutSonuc(o, ham){
+  V.sonuc = o;
+  if (o.islem !== 'gorev-ekle' || !o.isId){
+    vSet('Anlaşılmadı', ham);
+    document.getElementById('v-body').innerHTML =
+      `<p class="vq">${esc(o.soru || 'Hangi iş için, hangi güne?')}</p>`;
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="mic">Tekrar söyle</button><button class="btn" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  const guven = +o.guven || 0;
+  if (guven >= 0.75 && o.metin){ komutUygula(o, true); return; }
+  vSet('Onay bekliyor', ham);
+  document.getElementById('v-body').innerHTML = komutOzet(o) +
+    `<p class="vq">${esc(o.soru || 'Doğru mu?')}</p>`;
+  document.getElementById('v-acts').innerHTML =
+    '<button class="btn primary" data-act="voice-ok">Ekle</button>' +
+    '<button class="btn" data-act="mic">Tekrar söyle</button>' +
+    '<button class="btn ghost" data-act="voice-close">İptal</button>';
+}
+
+function komutOzet(o){
+  const ad = komutIsAdi(o);
+  const g = o.gun ? (DAY_FULL[(fromIso(o.gun).getDay() + 6) % 7] + ' ' + shortDate(o.gun)) : 'tarihsiz';
+  return `<div class="vsum">
+    <div><span>İş</span><b>${esc(ad)}</b></div>
+    <div><span>Gün</span><b>${esc(g)}</b></div>
+    <div><span>Not</span><b>${esc(o.metin || '')}</b></div>
+  </div>`;
+}
+function komutIsAdi(o){
+  if (String(o.isId || '').startsWith('a42:')){
+    const x = a42Devam().find(z => 'a42:' + z.is_id === o.isId);
+    if (x) return [x.musteri, x.proje].filter(Boolean).join(' · ');
+  } else {
+    const j = jobById(String(o.isId || '').replace(/^job:/, ''));
+    if (j) return jobLabel(j);
+  }
+  return o.isAd || '—';
+}
+
+async function komutUygula(o, otomatik){
+  const id = String(o.isId || '');
+  let jobId = null;
+  if (id.startsWith('a42:')){
+    const isId = id.slice(4);
+    const v = S.jobs.find(j => String(j.a42Id || '') === isId);
+    if (v) jobId = v.id;
+    else {
+      const x = a42Devam().find(z => z.is_id === isId);
+      jobId = await S.store.add('jobs', { customer: (x && x.musteri) || '', project: (x && x.proje) || '',
+        archived: false, a42Id: isId, ci: S.jobs.length % SWATCH.length, createdAt: Date.now() });
+      ensureContact(x && x.musteri);
+    }
+  } else {
+    jobId = id.replace(/^job:/, '');
+    if (!jobById(jobId)) jobId = null;
+  }
+  if (!jobId){ vSet('İş bulunamadı', V.metin); return; }
+  const gorevId = await S.store.add('tasks', { jobId, day: o.gun || '', text: o.metin || V.metin,
+    done: false, createdAt: Date.now() });
+  voiceKapat();
+  const g = o.gun ? shortDate(o.gun) : 'tarihsiz';
+  noteGeri((otomatik ? 'Eklendi' : 'Eklendi') + ' — ' + komutIsAdi(o) + ' · ' + g, () => S.store.remove('tasks', gorevId));
+  render();
+}
+
+/* geri alınabilir bildirim */
+function noteGeri(msg, geri){
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<span>${esc(msg)}</span>`;
+  const b = document.createElement('button');
+  b.className = 'toast-undo'; b.textContent = 'Geri al';
+  b.onclick = () => { try { geri(); } catch(e){} t.remove(); };
+  t.appendChild(b);
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 7000);
+}
+
 /* ============ rehber penceresi ============ */
 function openPicker(type, btn){
   const r = btn.getBoundingClientRect();
@@ -929,7 +1146,21 @@ function a42Alani(){
     <input type="url" id="a-a42" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(url)}" autocomplete="off" spellcheck="false">
     <p class="who">${esc(durum)}</p>
     <div class="row"><button class="btn" data-act="a42-save">Kaydet ve bağlan</button>
-    <button class="btn ghost" data-act="a42-reload">Tazele</button></div>`;
+    <button class="btn ghost" data-act="a42-reload">Tazele</button></div>
+    ${aiAlani()}`;
+}
+
+function aiAlani(){
+  const k = getSetting('claudekey'), m = getSetting('claudemodel');
+  const durum = !k ? 'Tanımlı değil — sesli komut için console.anthropic.com\u2019dan bir API anahtarı alın.'
+    : (m ? 'Bağlı · ' + m : 'Anahtar kayıtlı ama model doğrulanmadı — Kaydet ve doğrula deyin.');
+  const destek = (window.SpeechRecognition || window.webkitSpeechRecognition)
+    ? '' : '<p class="who">Bu tarayıcı konuşma tanımayı desteklemiyor — Chrome gerekiyor.</p>';
+  return `<hr class="sep">
+    <label for="a-key">Sesli komut · Claude API anahtarı</label>
+    <input type="password" id="a-key" placeholder="sk-ant-..." value="${esc(k)}" autocomplete="off" spellcheck="false">
+    <p class="who">${esc(durum)}</p>${destek}
+    <div class="row"><button class="btn" data-act="ai-save">Kaydet ve doğrula</button></div>`;
 }
 
 const closeSheet = () => { sheet.hidden = true; };
@@ -1016,6 +1247,24 @@ document.addEventListener('click', async (e) => {
     await loadA42(false);
     openSheet();
     note(v ? (a42Devam().length + ' devam eden iş okundu.') : 'A42 bağlantısı kaldırıldı.');
+    return;
+  }
+  if (a === 'mic'){ sesBaslat(); return; }
+  if (a === 'voice-close'){ voiceKapat(); return; }
+  if (a === 'voice-ok'){ if (V.sonuc) komutUygula(V.sonuc, false); return; }
+  if (a === 'ai-save'){
+    const v = (document.getElementById('a-key')?.value || '').trim();
+    if (!v){ await setSetting('claudekey',''); await setSetting('claudemodel',''); openSheet(); note('Anahtar kaldırıldı.'); return; }
+    if (!/^sk-ant-/.test(v)){ note('Anahtar sk-ant- ile başlamalı.'); return; }
+    await setSetting('claudekey', v);
+    try {
+      const m = await aiModelSec();
+      await setSetting('claudemodel', m);
+      openSheet(); note('Bağlandı · ' + m);
+    } catch(e){
+      await setSetting('claudemodel','');
+      openSheet(); note('Anahtar doğrulanamadı: ' + e.message);
+    }
     return;
   }
   if (a === 'a42-reload'){ S.a42.at = 0; await loadA42(false); openSheet(); return; }
