@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19z";
+const APP_VERSION = "2026.09.20a";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -160,6 +160,12 @@ const KIND = { O: 'Ofis bölme', K: 'Kapı kasası', S: 'Süpürgelik' };
 function customerList(){
   const map = new Map();   // normalize -> { name, contactId, n, last, src }
   a42Devam().forEach(x => {                   // A42'de devam eden işlerin müşterileri
+    if (!x.musteri) return;
+    const k = norm(x.musteri);
+    if (!map.has(k)) map.set(k, { name: x.musteri, contactId: null, n: 0, last: '', src: 'job', jobs: 0 });
+    map.get(k).jobs++;
+  });
+  a42Teklif().forEach(x => {                  // bekleyen tekliflerin müşterileri
     if (!x.musteri) return;
     const k = norm(x.musteri);
     if (!map.has(k)) map.set(k, { name: x.musteri, contactId: null, n: 0, last: '', src: 'job', jobs: 0 });
@@ -629,17 +635,32 @@ const a42Devam = () => (S.a42.isler || [])
   .sort((a, b) => String(b.baslangic || '').split('.').reverse().join('')
                  .localeCompare(String(a.baslangic || '').split('.').reverse().join('')));
 
+/* A42'de gönderilmiş ama henüz işe dönüşmemiş teklifler.
+   İş kartı kimliği teklifin kendi kimliğinden türetilir → cihazlar arası tek kart. */
+const a42Teklif = () => (S.a42.teklifler || [])
+  .filter(x => ['GONDERILDI', 'KABUL'].includes(String(x.durum || '')) && !String(x.is_id || '').trim())
+  .sort((a, b) => String(b.guncelleme || '').localeCompare(String(a.guncelleme || '')));
+
+/* Teklif kimliği uzun bir metin ("Müşteri|Proje|Tarih") — belge kimliğine çevir */
+function tkfKimlik(id){
+  const t = String(id || '');
+  let h = 5381;
+  for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+  const slug = norm(t).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  return 'tkf-' + h.toString(36) + (slug ? '-' + slug : '');
+}
+
 let a42Bekliyor = false;
 async function loadA42(yumusak){
   const url = getSetting('a42url');
-  if (!url){ S.a42 = { isler: [], at: 0, hata: '' }; return; }
+  if (!url){ S.a42 = { isler: [], teklifler: [], at: 0, hata: '' }; return; }
   if (a42Bekliyor) return;
   if (yumusak && S.a42.at && Date.now() - S.a42.at < 600000) return;
   a42Bekliyor = true;
   try {
     const res = await jsonp(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list', 20000);
     if (res && res.ok){
-      S.a42 = { isler: res.isler || [], at: Date.now(), hata: '' };
+      S.a42 = { isler: res.isler || [], teklifler: res.teklifler || [], at: Date.now(), hata: '' };
     } else {
       S.a42 = { ...S.a42, hata: 'A42 yanıtı okunamadı' };
     }
@@ -833,6 +854,7 @@ async function aiModelSec(){
 function aiIsListesi(){
   const L = [];
   a42Devam().forEach(x => L.push({ id: 'a42:' + x.is_id, m: x.musteri || '', p: x.proje || '' }));
+  a42Teklif().slice(0, 25).forEach(x => L.push({ id: 'tkf:' + x.id, m: (x.musteri || '') + ' (teklif)', p: x.proje || '' }));
   S.jobs.filter(j => !j.archived && !j.genel).forEach(j => L.push({ id: 'job:' + j.id, m: j.customer || '', p: j.project || '' }));
   /* genel başlıklar: projeden bağımsız işler (muhasebe, hatırlatma…) */
   genelListe().forEach(g => L.push({ id: 'job:' + g.id, m: 'GENEL', p: g.ad }));
@@ -955,6 +977,7 @@ async function komutCoz(metin){
     '',
     'KURALLAR:',
     '- isId: İŞ LİSTESİ’nden EN İYİ eşleşen id; eşleşme yoksa null ve guven düşük.',
+    '- Müşterisinde "(teklif)" yazanlar henüz işe dönüşmemiş, verilmiş tekliflerdir — takip görevi (arama, hatırlatma, revizyon) bunlara bağlanabilir.',
     '- gorevId: MEVCUT GÖREVLER listesinden EN İYİ eşleşen id. Birden fazla görev aynı derecede uyuyorsa "anlasilmadi" dön ve soru ile hangisi olduğunu sor — rastgele seçme.',
     '- Müşteri sütunu GENEL olanlar projeden bağımsız başlıklardır. Komutta mimar/proje geçmiyorsa bunlardan uygun olanı seç — proje uydurma. Hangisi ne kapsar:',
     '    Muhasebe: fatura, vergi, beyanname, SGK, ödeme, kar payı, mali müşavir.',
@@ -1281,8 +1304,16 @@ function renderPicker(){
       <span class="pop-nm"><span class="gdot" style="background:${SWATCH[g.ci % SWATCH.length]}"></span>${esc(g.ad)}</span>
       <span class="pop-sub">${g.var ? (tasksOfJob(g.id).length ? tasksOfJob(g.id).length + ' görev' : 'genel') : 'genel'}</span></button></div>`;
     const fg = a => a.filter(g => hit(g.ad) || hit('genel'));
+    /* A42'de gönderilmiş, henüz işe dönüşmemiş teklifler */
+    const bekleyen = a42Teklif();
+    const brow = x => `<div class="pop-row bkl"><button class="pop-pick" data-act="pop-choose" data-tkf="${esc(x.id)}" data-val="${esc(x.proje || '')}" data-cust="${esc(x.musteri || '')}">
+      <span class="pop-nm">${esc(x.proje || x.musteri || 'İsimsiz teklif')}</span>
+      <span class="pop-sub">${[x.musteri, String(x.durum) === 'KABUL' ? 'KABUL' : 'teklif verildi'].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
+    const fb = a => a.filter(x => hit(x.proje) || hit(x.musteri));
+
     const genBlok = block('Genel · projeden bağımsız', fg(gen), grow, 20);
     let kalan = block('Devam eden işler · A42', fa(devam), arow, CAP)
+              + block('Bekleyen teklifler · A42', fb(bekleyen), brow, CAP)
               + block('Uygulamada açılan işler', fj(yerel), jrow, 30)
               + block('Teklif arşivi', fp(teklif), trow, CAP);
     if (!devam.length){
@@ -1363,6 +1394,23 @@ async function genelChoose(id, ad, ci){
     await S.store.setId('jobs', id, { customer: '', project: ad || 'Genel', genel: true,
       archived: false, a42Id: '', ci: ci || 0, createdAt: Date.now() });
     note('Genel başlık açıldı — ' + (ad || 'Genel'));
+  }
+  S.draft.job = id;
+  const t = document.getElementById('c-text');
+  if (t) S.draft.text = t.value;
+  closePicker();
+  render();
+}
+
+/* A42 teklifini iş kartına bağla (yoksa aç). Sabit kimlik → tek kart. */
+async function teklifChoose(tkfId, proje, musteri){
+  const id = tkfKimlik(tkfId);
+  if (!jobById(id)){
+    await S.store.setId('jobs', id, { customer: musteri || '', project: proje || '', archived: false,
+      a42Id: '', tkfId: String(tkfId || ''), teklif: true,
+      ci: S.jobs.length % SWATCH.length, createdAt: Date.now() });
+    ensureContact(musteri);
+    note('Teklif kartı açıldı — ' + (proje || musteri));
   }
   S.draft.job = id;
   const t = document.getElementById('c-text');
@@ -1694,6 +1742,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'pop-choose'){
     if (S.picker && S.picker.type === 'job'){
       if (b.dataset.genel){ genelChoose(b.dataset.genel, b.dataset.val, +b.dataset.ci || 0); return; }
+      if (b.dataset.tkf){ teklifChoose(b.dataset.tkf, b.dataset.val, b.dataset.cust); return; }
       jobChoose(b.dataset.job, b.dataset.val, b.dataset.cust, b.dataset.a42); return;
     }
     pickerChoose(b.dataset.val, b.dataset.cust); return;
@@ -1726,7 +1775,7 @@ document.addEventListener('click', async (e) => {
     const v = (document.getElementById('a-a42')?.value || '').trim();
     if (v && !/^https:\/\/script\.google\.com\//.test(v)){ note('Adres https://script.google.com/… ile başlamalı.'); return; }
     await setSetting('a42url', v);
-    S.a42 = { isler: [], at: 0, hata: '' };
+    S.a42 = { isler: [], teklifler: [], at: 0, hata: '' };
     await loadA42(false);
     openSheet();
     note(v ? (a42Devam().length + ' devam eden iş okundu.') : 'A42 bağlantısı kaldırıldı.');
