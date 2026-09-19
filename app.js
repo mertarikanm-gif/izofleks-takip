@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20f";
+const APP_VERSION = "2026.09.20g";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -970,17 +970,40 @@ function tarihTablosu(b){
 }
 
 /* Modelin hedef görevi seçebilmesi için açık görev listesi */
+/* Uzun rastgele kimlikleri model hatasız kopyalayamıyor — kısa G1, G2… numarası veriyoruz. */
+let sesGorevHarita = {};
+
 function aiGorevListesi(){
   const t0 = todayIso();
   const L = S.tasks
     .filter(t => !t.done || t.day === t0)
     .sort((a, b) => (a.day || '9999').localeCompare(b.day || '9999') || (a.createdAt || 0) - (b.createdAt || 0))
     .slice(0, 80);
-  return L.map(t => {
+  sesGorevHarita = {};
+  return L.map((t, i) => {
+    const kod = 'G' + (i + 1);
+    sesGorevHarita[kod] = t.id;
     const j = jobById(t.jobId);
     const ne = t.pin ? 'sabit' : (t.day || 'tarihsiz');
-    return t.id + ' | ' + ne + ' | ' + (j ? jobLabel(j) : '—') + ' | ' + (t.text || '') + (t.done ? ' | BİTTİ' : '');
+    return kod + ' | ' + ne + ' | ' + (j ? jobLabel(j) : '—') + ' | ' + (t.text || '') + (t.done ? ' | BİTTİ' : '');
   });
+}
+
+/* Model G3 gibi bir kod, gerçek kimlik ya da doğrudan görev metni dönebilir — hepsini karşıla. */
+function gorevCoz(v){
+  const x = String(v || '').trim();
+  if (!x) return null;
+  const kod = x.toUpperCase().replace(/[^G0-9]/g, '');
+  if (sesGorevHarita[kod]) return sesGorevHarita[kod];
+  if (S.tasks.some(t => t.id === x)) return x;
+  const q = norm(x);
+  if (q.length >= 3){
+    const tam = S.tasks.find(t => norm(t.text) === q);
+    if (tam) return tam.id;
+    const ic = S.tasks.filter(t => norm(t.text).includes(q) || q.includes(norm(t.text)));
+    if (ic.length === 1) return ic[0].id;
+  }
+  return null;
 }
 
 /* Modelin yanıtından JSON'u güvenle çıkar.
@@ -1044,7 +1067,7 @@ async function komutCoz(metin){
     'İŞ LİSTESİ (isId | müşteri | proje):',
     isler.map(x => x.id + ' | ' + x.m + ' | ' + x.p).join('\n'),
     '',
-    'MEVCUT GÖREVLER (gorevId | gün | iş | metin):',
+    'MEVCUT GÖREVLER (gorevId | gün | iş | metin) — gorevId olarak SADECE bu kısa kodları (G1, G2…) kullan:',
     (gorevler.length ? gorevler.join('\n') : '(görev yok)'),
     '',
     'SADECE geçerli JSON döndür — açıklama, başlık, kod çiti (```) YAZMA. JSON\u2019dan sonra tek karakter bile olmasın.',
@@ -1057,8 +1080,8 @@ async function komutCoz(metin){
     'İŞLEMLER:',
     '- ekle: yeni görev. isId + metin zorunlu, gun/sabit isteğe bağlı.',
     '- tasi: var olan görevin gününü değiştir ("cumaya al", "yarına kaydır", "tarihsize at" → gun null). gorevId + gun.',
-    '- sil: görevi kaldır ("sil", "kaldır", "iptal et"). gorevId.',
-    '- bitti: görevi tamamlandı işaretle ("bitti", "tamamlandı", "yapıldı"). gorevId.',
+    '- sil: görevi kaldır — "sil", "kaldır", "iptal et", "çıkar", "listeden çıkar". gorevId.',
+    '- bitti: görevi tamamlandı işaretle — "bitti", "tamamlandı", "yapıldı", "tikle", "işaretle", "halloldu", "bitirdim". gorevId.',
     '- geri-al: tamamlanmış görevi tekrar aç ("geri al", "bitmedi", "aç"). gorevId.',
     '- sabitle / sabit-kaldir: görevi sabit panele al / oradan çıkar. gorevId.',
     '- duzenle: görev metnini değiştir. metin = YENİ TAM METİN.',
@@ -1070,7 +1093,7 @@ async function komutCoz(metin){
     'KURALLAR:',
     '- isId: İŞ LİSTESİ’nden EN İYİ eşleşen id; eşleşme yoksa null ve guven düşük.',
     '- Müşterisinde "(teklif)" yazanlar henüz işe dönüşmemiş, verilmiş tekliflerdir — takip görevi (arama, hatırlatma, revizyon) bunlara bağlanabilir.',
-    '- gorevId: MEVCUT GÖREVLER listesinden EN İYİ eşleşen id. Birden fazla görev aynı derecede uyuyorsa "anlasilmadi" dön ve soru ile hangisi olduğunu sor — rastgele seçme.',
+    '- gorevId: MEVCUT GÖREVLER listesindeki kısa kod (örn. "G3"). Birden fazla görev aynı derecede uyuyorsa "anlasilmadi" dön ve soru ile hangisi olduğunu sor — rastgele seçme.',
     '- Müşteri sütunu GENEL olanlar projeden bağımsız başlıklardır. Komutta mimar/proje geçmiyorsa bunlardan uygun olanı seç — proje uydurma. Hangisi ne kapsar:',
     '    Muhasebe: fatura, vergi, beyanname, SGK, ödeme, kar payı, mali müşavir.',
     '    Ofis / İdari: ofis işleri, evrak, kırtasiye, araç, resmî yazışma.',
@@ -1121,6 +1144,10 @@ function komutSonuc(veri, ham){
   const o = dizi[0] || {};
   V.sonuc = o;
   const islem = String(o.islem || '');
+  if (HEDEF_ISLEM.includes(islem)){        /* kodu gerçek kimliğe çevir */
+    const ger = gorevCoz(o.gorevId);
+    if (ger) o.gorevId = ger;
+  }
   const gecerli = (islem === 'ekle' && o.isId && o.metin)
                || (islem === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
                || (HEDEF_ISLEM.includes(islem) && islem !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
@@ -1154,6 +1181,7 @@ function komutSonuc(veri, ham){
 function komutCoklu(dizi, ham){
   const gecerliMi = o => {
     const i = String(o.islem || '');
+    if (HEDEF_ISLEM.includes(i)){ const g = gorevCoz(o.gorevId); if (g) o.gorevId = g; }
     return (i === 'ekle' && o.isId && o.metin)
         || (i === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
         || (HEDEF_ISLEM.includes(i) && i !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
