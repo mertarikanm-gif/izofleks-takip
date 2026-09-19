@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19u";
+const APP_VERSION = "2026.09.19v";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -687,8 +687,7 @@ function voiceKapat(){
 
 /* Cümleyi yarıda kesmesin diye:
    · continuous=true → tarayıcı ilk duraklamada durmaz
-   · SESSIZLIK ms boyunca yeni kelime gelmezse kendi bitirir
-   · "Bitir" tuşu istediğin an gönderir
+   · otomatik kapanma yok — yalnızca "Bitir" tuşu bitirir
    · Chrome motoru kendi kendine kapanırsa (no-speech / onend) sessizce yeniden başlatılır */
 const SES_TUR = 30;                       /* motor kendi kapanırsa en fazla bu kadar yeniden başlat */
 let sesBitti = false, sesSon = '', sesTur = 0;
@@ -795,6 +794,34 @@ function aiIsListesi(){
   return L.slice(0, 70);
 }
 
+/* Tarihleri modele hesaplatma — hepsini burada çıkarıp hazır tablo olarak ver.
+   Böylece "önümüzdeki hafta" bir hafta kayamaz. */
+function tarihTablosu(b){
+  const buPzt = mondayOf(b), gelPzt = addDays(buPzt, 7), sonPzt = addDays(buPzt, 14);
+  const gunAdi = d => DAY_FULL[(d.getDay() + 6) % 7];
+  const sat = (etiket, d) => '  ' + etiket + ' = ' + iso(d) + ' (' + gunAdi(d) + ')';
+  const L = [];
+  L.push('BUGÜN: ' + iso(b) + ' (' + gunAdi(b) + '). Hafta PAZARTESİ başlar.');
+  L.push('BU HAFTA: ' + iso(buPzt) + ' → ' + iso(addDays(buPzt, 6)));
+  L.push('ÖNÜMÜZDEKİ HAFTA (= gelecek hafta = haftaya): ' + iso(gelPzt) + ' → ' + iso(addDays(gelPzt, 6)));
+  L.push('SONRAKİ HAFTA (= iki hafta sonra): ' + iso(sonPzt) + ' → ' + iso(addDays(sonPzt, 6)));
+  L.push('');
+  L.push('TARİH SÖZLÜĞÜ — bu tablodaki değerleri OLDUĞU GİBİ kullan, kendin hesaplama:');
+  L.push(sat('bugün', b));
+  L.push(sat('yarın', addDays(b, 1)));
+  L.push(sat('öbür gün', addDays(b, 2)));
+  L.push(sat('haftaya / gelecek hafta / önümüzdeki hafta (gün belirtilmemişse)', gelPzt));
+  for (let i = 0; i < 7; i++){
+    const ad = DAY_FULL[i].toLocaleLowerCase('tr');
+    L.push(sat('bu ' + ad, addDays(buPzt, i)));
+    L.push(sat('önümüzdeki ' + ad + ' / gelecek ' + ad + ' / haftaya ' + ad, addDays(gelPzt, i)));
+  }
+  L.push('  Sadece gün adı söylenirse (örn. "çarşamba") → bugünden SONRAKİ ilk o gün.');
+  L.push('  "önümüzdeki" asla iki hafta sonrası demek değildir; yalnızca bir sonraki hafta demektir.');
+  L.push('');
+  return L.join('\n');
+}
+
 async function komutCoz(metin){
   vSet('Komut çözülüyor…', metin);
   { const a = document.getElementById('v-acts');
@@ -803,8 +830,7 @@ async function komutCoz(metin){
   const isler = aiIsListesi();
   const sistem = [
     'Bir Türk alüminyum doğrama firmasının iş takip uygulaması için sesli komutları JSON\'a çeviriyorsun.',
-    'BUGÜN: ' + iso(bugun) + ' (' + DAY_FULL[(bugun.getDay() + 6) % 7] + ').',
-    'Hafta Pazartesi başlar. "önümüzdeki <gün>" = bu haftadan SONRAKİ haftanın o günü. "bu <gün>" = içinde bulunulan haftanın o günü. "yarın", "öbür gün", "haftaya" da desteklenir.',
+    tarihTablosu(bugun),
     'İŞ LİSTESİ (id | müşteri | proje):',
     isler.map(x => x.id + ' | ' + x.m + ' | ' + x.p).join('\n'),
     '',
