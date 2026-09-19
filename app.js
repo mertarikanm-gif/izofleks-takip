@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20e";
+const APP_VERSION = "2026.09.20f";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -706,6 +706,7 @@ function voiceAc(){
 }
 function voiceKapat(){
   V.acik = false;
+  sesIptal = true;
   V.cevapModu = false;
   soruTur = 0;
   susturKonus();
@@ -751,7 +752,7 @@ function sesBaslat(){
   susturKonus();
   voiceAc();
   sesGecmis = []; soruTur = 0;            /* yeni komut → geçmiş sıfır */
-  sesBitti = false; sesSon = ''; sesKesin = ''; sesTur = 0;
+  sesBitti = false; sesIptal = false; sesSon = ''; sesKesin = ''; sesAlt = []; sesTur = 0;
   sesDinle();
 }
 
@@ -766,7 +767,7 @@ function sesCevapla(){
     '<button class="btn primary" data-act="voice-bitir">Bitir</button>' +
     '<button class="btn" data-act="voice-close">Vazgeç</button>';
   vSet('Dinleniyor…', '');
-  sesBitti = false; sesSon = ''; sesKesin = ''; sesTur = 0;
+  sesBitti = false; sesIptal = false; sesSon = ''; sesKesin = ''; sesAlt = []; sesTur = 0;
   V.cevapModu = true;
   sesDinle();
 }
@@ -824,6 +825,8 @@ function birlestir(a, b){
 }
 
 let sesKesin = '';        /* önceki oturumlarda kesinleşmiş metin */
+let sesAlt = [];          /* tanıyıcının alternatif tahminleri */
+let sesIptal = false;     /* elle düzeltme gönderildi → tanıyıcının kalan olaylarını yoksay */
 
 /* Android Chrome'da continuous kipi aynı sonucu tekrar tekrar veriyor — orada kapalı çalış,
    oturum kendiliğinden bitince yeniden başlat. Masaüstünde continuous sorunsuz. */
@@ -834,7 +837,7 @@ function sesDinle(){
   sesTanir = r;
   const kesinler = [];            /* indeks → kesinleşmiş parça (tekrar gelirse ÜZERİNE yazar) */
   let gecici = '';
-  r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 1;
+  r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 4;   /* alternatifleri de Claude'a veriyoruz */
   r.continuous = !ANDROID;
 
   const oturumMetni = () => tekrarTemizle(kesinler.filter(Boolean).join(' ') + ' ' + gecici);
@@ -843,8 +846,14 @@ function sesDinle(){
     gecici = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++){
       const res = ev.results[i], par = (res[0] && res[0].transcript) || '';
-      if (res.isFinal) kesinler[i] = par;      /* eklemiyoruz — indekse yazıyoruz */
-      else gecici = par;
+      if (res.isFinal){
+        kesinler[i] = par;                     /* eklemiyoruz — indekse yazıyoruz */
+        /* tanıyıcının diğer tahminleri: Claude doğrusunu seçsin diye saklanıyor */
+        for (let k = 1; k < res.length && k < 4; k++){
+          const alt = (res[k] && res[k].transcript || '').trim();
+          if (alt && alt !== par && sesAlt.indexOf(alt) < 0) sesAlt.push(alt);
+        }
+      } else gecici = par;
     }
     sesSon = tekrarTemizle(birlestir(sesKesin, oturumMetni()));
     V.metin = sesSon;
@@ -859,6 +868,7 @@ function sesDinle(){
   };
 
   r.onerror = ev => {
+    if (sesIptal) return;
     if (ev.error === 'no-speech' && !sesBitti && sesTur < SES_TUR){ return; }
     oturumuKapat();
     sesBitti = true; sesTanir = null;
@@ -869,11 +879,13 @@ function sesDinle(){
                 'network':'İnternet bağlantısı gerekiyor.' }[ev.error] || ('Ses hatası: ' + ev.error);
     if (sesSon){ komutCoz(sesSon); return; }
     vSet(m, sesSon);
+    document.getElementById('v-body').innerHTML = yazDuzeltHtml('');
     document.getElementById('v-acts').innerHTML =
       '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
   };
 
   r.onend = () => {
+    if (sesIptal){ sesTanir = null; return; }
     oturumuKapat();
     sesTanir = null;
     if (!V.acik) return;
@@ -1018,6 +1030,16 @@ async function komutCoz(metin){
   const gorevler = aiGorevListesi();
   const sistem = [
     'Bir Türk alüminyum doğrama firmasının iş takip uygulaması için sesli komutları JSON\'a çeviriyorsun.',
+    '',
+    'GİRİŞ METNİ HAKKINDA — ÖNEMLİ:',
+    'Metin telefonun tarayıcı konuşma tanıyıcısından geliyor ve HATALI olabilir:',
+    '- Türkçe kelimeler İngilizce yazılmış gibi çıkabilir (“cam”→“come”, “bay”→“buy”, “kası”→“casi”, “aşık”→“asic”).',
+    '- Kelimeler yanlış bölünmüş ya da birleşmiş olabilir; Türkçe karakterler düşmüş olabilir (ş→s, ı→i, ğ→g, ü→u, ö→o, ç→c).',
+    '- Özel adlar (mimar, firma, proje) bozuk gelebilir.',
+    'Bu yüzden metni HARF HARF değil SESLETİM olarak değerlendir: Türkçe okunduğunda neye benziyorsa o kabul et.',
+    'İş/müşteri/proje adlarını aşağıdaki listelerle SES BENZERLİĞİNE göre eşleştir; birebir yazım tutması gerekmez.',
+    'metin alanına DÜZELTİLMİŞ düzgün Türkçe yaz — tanıyıcının bozuk çıktısını aynen kopyalama.',
+    'Birden çok "ALTERNATİF" verilmişse hepsi aynı cümlenin farklı tahminidir; en anlamlısını seç ya da birleştirerek doğrusunu kur.',
     tarihTablosu(bugun),
     'İŞ LİSTESİ (isId | müşteri | proje):',
     isler.map(x => x.id + ' | ' + x.m + ' | ' + x.p).join('\n'),
@@ -1067,7 +1089,11 @@ async function komutCoz(metin){
   try {
     let model = getSetting('claudemodel');
     if (!model){ model = await aiModelSec(); await setSetting('claudemodel', model); }
-    sesGecmis.push({ role: 'user', content: metin });
+    const altlar = (sesAlt || []).filter(x => norm(x) !== norm(metin)).slice(0, 3);
+    const kullanici = altlar.length
+      ? metin + '\n\n(ALTERNATİF tahminler: ' + altlar.join(' | ') + ')'
+      : metin;
+    sesGecmis.push({ role: 'user', content: kullanici });
     if (sesGecmis.length > 9) sesGecmis = sesGecmis.slice(-9);
     const j = await aiFetch('messages', {
       model, max_tokens: 400, system: sistem, messages: sesGecmis
@@ -1101,7 +1127,8 @@ function komutSonuc(veri, ham){
   if (!gecerli){
     const soru = o.soru || 'Hangi iş için, hangi güne?';
     vSet('Soru', ham);
-    document.getElementById('v-body').innerHTML = `<p class="vq">${esc(soru)}</p>`;
+    document.getElementById('v-body').innerHTML =
+      `<p class="vq">${esc(soru)}</p>` + yazDuzeltHtml(ham);
     document.getElementById('v-acts').innerHTML =
       '<button class="btn primary" data-act="voice-cevap">&#127908; Cevapla</button>' +
       '<button class="btn" data-act="mic">Baştan söyle</button>' +
@@ -1166,6 +1193,16 @@ async function komutCokluUygula(){
 }
 
 /* Soruyu sesli oku, sonra kendiliğinden dinlemeye geç */
+/* Tanıma tutturamazsa: metni elle düzeltip gönderme alanı */
+function yazDuzeltHtml(ham){
+  return `<div class="vfix">
+    <label class="vfix-l" for="v-fix">Tanıma yanlışsa düzeltip gönderin</label>
+    <div class="vfix-r">
+      <input type="text" id="v-fix" value="${esc(ham || '')}" autocomplete="off" aria-label="Komutu düzelt">
+      <button class="btn" data-act="voice-yaz">Gönder</button>
+    </div></div>`;
+}
+
 /* Soru ekranda YAZIYLA durur; kısa bir beklemeden sonra cevabı dinlemeye geçer. */
 function soruSor(){
   soruTur++;
@@ -1972,6 +2009,16 @@ document.addEventListener('click', async (e) => {
   if (a === 'mic'){ sesBaslat(); return; }
   if (a === 'voice-bitir'){ sesBitir(); return; }
   if (a === 'voice-cevap'){ sesCevapla(); return; }
+  if (a === 'voice-yaz'){
+    const v = (document.getElementById('v-fix')?.value || '').trim();
+    if (!v) return;
+    sesIptal = true; sesBitti = true;
+    try { sesTanir && sesTanir.abort(); } catch(err){}
+    sesTanir = null; sesAlt = []; sesKesin = v; sesSon = v; V.metin = v;
+    vEl().classList.remove('dinliyor');
+    komutCoz(v);
+    return;
+  }
   if (a === 'voice-coklu'){ komutCokluUygula(); return; }
   if (a === 'voice-close'){ voiceKapat(); return; }
   if (a === 'voice-ok'){ if (V.sonuc) komutUygula(V.sonuc, false); return; }

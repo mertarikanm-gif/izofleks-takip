@@ -601,3 +601,12 @@ html,body{overscroll-behavior-x:contain;}
 .task:hover .editb,.task:focus-within .editb{opacity:1;}
 .task .editb:hover{color:var(--accent-ink);background:var(--accent-soft);}
 @media (hover:none){.task .editb{opacity:.6;}}
+
+/* sesli komut: yazarak düzeltme */
+.vfix{margin-top:12px;border-top:1px solid var(--line);padding-top:10px;}
+.vfix-l{display:block;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:5px;}
+.vfix-r{display:flex;gap:6px;}
+.vfix-r input{flex:1;min-width:0;border:1px solid var(--line-2);background:var(--panel);
+  border-radius:8px;padding:8px 9px;font:inherit;font-size:13.5px;}
+.vfix-r .btn{flex:0 0 auto;}
