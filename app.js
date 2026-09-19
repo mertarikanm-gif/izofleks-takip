@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19r";
+const APP_VERSION = "2026.09.19s";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -615,53 +615,107 @@ const vSet = (durum, metin) => {
 function voiceAc(){
   V.acik = true; V.metin = ''; V.sonuc = null;
   vEl().hidden = false;
-  document.getElementById('v-body').innerHTML = '';
-  document.getElementById('v-acts').innerHTML = '<button class="btn" data-act="voice-close">Vazgeç</button>';
+  document.getElementById('v-body').innerHTML =
+    '<p class="vq">Rahat konuşun — susunca kendi kapanır, acelesi varsa “Bitir”e basın.</p>';
+  document.getElementById('v-acts').innerHTML =
+    '<button class="btn primary" data-act="voice-bitir">Bitir</button>' +
+    '<button class="btn" data-act="voice-close">Vazgeç</button>';
   vEl().classList.add('dinliyor');
   vSet('Dinleniyor…', '');
 }
 function voiceKapat(){
   V.acik = false;
+  sesBitti = true;
+  if (typeof sesSayacDur === 'function') sesSayacDur();
   try { sesTanir && sesTanir.abort(); } catch(e){}
   sesTanir = null;
   const e = vEl(); if (e){ e.hidden = true; e.classList.remove('dinliyor'); }
 }
 
+/* Cümleyi yarıda kesmesin diye:
+   · continuous=true → tarayıcı ilk duraklamada durmaz
+   · SESSIZLIK ms boyunca yeni kelime gelmezse kendi bitirir
+   · "Bitir" tuşu istediğin an gönderir
+   · Chrome motoru kendi kendine kapanırsa (no-speech / onend) sessizce yeniden başlatılır */
+const SESSIZLIK = 2500;
+let sesSayac = null, sesBitti = false, sesSon = '', sesTur = 0;
+
+function sesSayacDur(){ if (sesSayac){ clearTimeout(sesSayac); sesSayac = null; } }
+function sesSayacKur(){
+  sesSayacDur();
+  sesSayac = setTimeout(() => { sesBitir(); }, SESSIZLIK);
+}
+/* kullanıcı "Bitir"e bastı ya da sessizlik doldu */
+function sesBitir(){
+  if (sesBitti) return;
+  sesBitti = true; sesSayacDur();
+  try { sesTanir && sesTanir.stop(); } catch(e){}
+  if (!sesSon){                       /* hiç ses gelmediyse stop'u beklemeye gerek yok */
+    sesTanir = null;
+    vEl().classList.remove('dinliyor');
+    vSet('Bir şey duyamadım.', '');
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
+  }
+}
+
 function sesBaslat(){
   if (!sesDestek()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor (Chrome gerekir).'); return; }
   if (!getSetting('claudekey')){ note('Önce senkron penceresinden Claude API anahtarını girin.'); openSheet(); return; }
-  if (sesTanir){ try { sesTanir.stop(); } catch(e){} return; }
+  if (sesTanir){ sesBitir(); return; }
   voiceAc();
+  sesBitti = false; sesSon = ''; sesTur = 0;
+  sesDinle();
+}
+
+function sesDinle(){
   const r = new SR();
   sesTanir = r;
-  r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 1; r.continuous = false;
-  let son = '';
+  const oncesi = sesSon;                 /* bu turdan önce biriken metin */
+  r.lang = 'tr-TR'; r.interimResults = true; r.maxAlternatives = 1; r.continuous = true;
+
   r.onresult = ev => {
     let t = '';
     for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript;
-    son = t.trim(); V.metin = son;
-    vSet(null, son);
+    sesSon = (oncesi ? oncesi + ' ' : '') + t.trim();
+    V.metin = sesSon;
+    vSet(null, sesSon);
+    sesSayacKur();                        /* her yeni kelimede sayaç sıfırlanır */
   };
+
   r.onerror = ev => {
-    sesTanir = null;
+    /* no-speech: Chrome'un kendi sabırsızlığı — kullanıcı daha konuşmadıysa devam et */
+    if (ev.error === 'no-speech' && !sesBitti && sesTur < 3){ return; }
+    sesSayacDur(); sesBitti = true; sesTanir = null;
     vEl().classList.remove('dinliyor');
     const m = { 'not-allowed':'Mikrofon izni verilmedi.', 'service-not-allowed':'Mikrofon izni verilmedi.',
                 'no-speech':'Ses algılanmadı.', 'audio-capture':'Mikrofon bulunamadı.',
+                'aborted':'Dinleme durduruldu.',
                 'network':'İnternet bağlantısı gerekiyor.' }[ev.error] || ('Ses hatası: ' + ev.error);
-    vSet(m, son);
+    if (sesSon){ komutCoz(sesSon); return; }   /* elde metin varsa yine de çöz */
+    vSet(m, sesSon);
     document.getElementById('v-acts').innerHTML =
       '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
   };
+
   r.onend = () => {
     sesTanir = null;
-    vEl().classList.remove('dinliyor');
     if (!V.acik) return;
-    if (!son){ vSet('Bir şey duyamadım.', '');
+    if (!sesBitti){                       /* motor kendi kapandı → sessizce devam */
+      if (sesTur < 3){ sesTur++; try { sesDinle(); return; } catch(e){} }
+      sesBitti = true;
+    }
+    sesSayacDur();
+    vEl().classList.remove('dinliyor');
+    if (!sesSon){
+      vSet('Bir şey duyamadım.', '');
       document.getElementById('v-acts').innerHTML =
         '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
-      return; }
-    komutCoz(son);
+      return;
+    }
+    komutCoz(sesSon);
   };
+
   try { r.start(); } catch(e){ note('Mikrofon başlatılamadı.'); voiceKapat(); }
 }
 
@@ -695,6 +749,8 @@ function aiIsListesi(){
 
 async function komutCoz(metin){
   vSet('Komut çözülüyor…', metin);
+  { const a = document.getElementById('v-acts');
+    if (a) a.innerHTML = '<button class="btn" data-act="voice-close">Vazgeç</button>'; }
   const bugun = new Date();
   const isler = aiIsListesi();
   const sistem = [
@@ -1278,6 +1334,7 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (a === 'mic'){ sesBaslat(); return; }
+  if (a === 'voice-bitir'){ sesBitir(); return; }
   if (a === 'voice-close'){ voiceKapat(); return; }
   if (a === 'voice-ok'){ if (V.sonuc) komutUygula(V.sonuc, false); return; }
   if (a === 'ai-save'){
