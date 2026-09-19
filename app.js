@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19i";
+const APP_VERSION = "2026.09.19j";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -39,7 +39,7 @@ function rangeLabel(a, b){
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ============ depo: yerel ============ */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts'];
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings'];
 
 function localStore(){
   let data = {};
@@ -79,7 +79,8 @@ function firestoreStore(fs, uid){
 const S = {
   tab: 'week',
   weekStart: mondayOf(new Date()),
-  jobs: [], tasks: [], contacts: [],
+  jobs: [], tasks: [], contacts: [], settings: [],
+  a42: { isler: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
   ref: { c: [], p: [] },   // teklif arşivinden gelen müşteri/proje rehberi (rehber.json)
   showDone: false,
   showArchived: false,
@@ -363,6 +364,60 @@ const dataPanelHtml = () => `<details class="data"><summary>Veri · dışa/içe 
     <button class="btn" data-act="purge-done">Biten görevleri temizle</button>
   </div></div></details>`;
 
+/* ============ A42 bağlantısı ============ */
+/* Adres kodda durmaz — hesabın altına kaydedilir (depo herkese açık). */
+const getSetting = k => (S.settings.find(x => x.k === k) || {}).v || '';
+function setSetting(k, v){
+  const r = S.settings.find(x => x.k === k);
+  return r ? S.store.update('settings', r.id, { v })
+           : S.store.add('settings', { k, v });
+}
+
+/* Apps Script JSONP ile yanıt veriyor (CORS başlığı yok) */
+function jsonp(url, ms){
+  return new Promise((ok, no) => {
+    const cb = '_a42cb' + Date.now() + Math.floor(Math.random() * 1000);
+    const s = document.createElement('script');
+    let bitti = false;
+    const kapat = () => { try { delete window[cb]; } catch(e){} try { s.remove(); } catch(e){} };
+    window[cb] = res => { if (bitti) return; bitti = true; kapat(); ok(res || {}); };
+    s.onerror = () => { if (bitti) return; bitti = true; kapat(); no(new Error('bağlantı hatası')); };
+    s.src = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + cb + '&r=' + Math.random();
+    document.head.appendChild(s);
+    setTimeout(() => { if (bitti) return; bitti = true; kapat(); no(new Error('zaman aşımı')); }, ms || 15000);
+  });
+}
+
+const GENEL_GIDER = x => {
+  const t = ((x.musteri || '') + ' ' + (x.proje || '')).toLocaleLowerCase('tr');
+  return t.includes('genel gider') || String(x.is_id || '').toUpperCase().startsWith('GEN');
+};
+const a42Devam = () => (S.a42.isler || [])
+  .filter(x => String(x.durum || 'DEVAM') === 'DEVAM' && !GENEL_GIDER(x))
+  .sort((a, b) => String(b.baslangic || '').split('.').reverse().join('')
+                 .localeCompare(String(a.baslangic || '').split('.').reverse().join('')));
+
+let a42Bekliyor = false;
+async function loadA42(yumusak){
+  const url = getSetting('a42url');
+  if (!url){ S.a42 = { isler: [], at: 0, hata: '' }; return; }
+  if (a42Bekliyor) return;
+  if (yumusak && S.a42.at && Date.now() - S.a42.at < 600000) return;
+  a42Bekliyor = true;
+  try {
+    const res = await jsonp(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list', 20000);
+    if (res && res.ok){
+      S.a42 = { isler: res.isler || [], at: Date.now(), hata: '' };
+    } else {
+      S.a42 = { ...S.a42, hata: 'A42 yanıtı okunamadı' };
+    }
+  } catch(e){
+    S.a42 = { ...S.a42, hata: 'A42 bağlantısı kurulamadı (' + e.message + ')' };
+  }
+  a42Bekliyor = false;
+  renderPicker();
+}
+
 /* ============ rehber penceresi ============ */
 function openPicker(type, btn){
   const r = btn.getBoundingClientRect();
@@ -392,13 +447,19 @@ function renderPicker(){
 
   if (type === 'job'){
     title = 'İş / Proje';
-    const acik = S.jobs.filter(j => !j.archived);
-    const ars  = S.jobs.filter(j =>  j.archived);
-    const jrow = j => `<div class="pop-row${j.archived ? '' : ' live'}"><button class="pop-pick" data-act="pop-choose" data-job="${j.id}">
+    /* 1) Devam eden işler = A42 widget'ta DEVAM durumundaki işler */
+    const devam = a42Devam();
+    const arow = x => `<div class="pop-row live"><button class="pop-pick" data-act="pop-choose" data-a42="${esc(x.is_id)}" data-val="${esc(x.proje || '')}" data-cust="${esc(x.musteri || '')}">
+      <span class="pop-nm">${esc(x.proje || x.musteri || 'İsimsiz iş')}</span>
+      <span class="pop-sub">${[x.musteri, x.baslangic].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
+    /* 2) uygulamada elle açılan işler (A42'den gelmeyenler) */
+    const a42li = new Set(devam.map(x => String(x.is_id)));
+    const yerel = S.jobs.filter(j => !j.archived && !(j.a42Id && a42li.has(String(j.a42Id))));
+    const jrow = j => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-job="${j.id}">
       <span class="pop-nm">${esc(j.project || j.customer || 'İsimsiz iş')}</span>
       <span class="pop-sub">${[j.customer, tasksOfJob(j.id).length ? tasksOfJob(j.id).length + ' görev' : ''].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
-    // arşivdeki tekliflerden, zaten iş kartı olmayanlar
-    const varOlan = new Set(S.jobs.map(j => norm(j.project)));
+    /* 3) teklif arşivi */
+    const varOlan = new Set([...S.jobs.map(j => norm(j.project)), ...devam.map(x => norm(x.proje))]);
     const teklif = (S.ref.p || [])
       .filter(([c, p]) => p && !varOlan.has(norm(p)))
       .map(([c, p, k, y]) => ({ customer: c || '', name: p, kind: KIND[k] || '', year: y || '' }))
@@ -406,11 +467,18 @@ function renderPicker(){
     const trow = p => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}" data-cust="${esc(p.customer)}">
       <span class="pop-nm">${esc(p.name)}</span>
       <span class="pop-sub">${[p.customer, p.kind, p.year].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
+    const fa = a => a.filter(x => hit(x.proje) || hit(x.musteri));
     const fj = a => a.filter(j => hit(j.project) || hit(j.customer));
     const fp = a => a.filter(p => hit(p.name) || hit(p.customer));
-    body = block('Devam eden işler', fj(acik), jrow, CAP)
-         + block('Arşivlenmiş işler', fj(ars), jrow, 20)
+    body = block('Devam eden işler · A42', fa(devam), arow, CAP)
+         + block('Uygulamada açılan işler', fj(yerel), jrow, 30)
          + block('Teklif arşivi', fp(teklif), trow, CAP);
+    if (!devam.length){
+      const url = getSetting('a42url');
+      body = `<div class="pop-note">${url
+        ? (S.a42.hata ? esc(S.a42.hata) : 'A42\u2019de devam eden iş yok.')
+        : 'A42 bağlantısı tanımlı değil — senkron penceresinden ekleyin.'}</div>` + body;
+    }
     if (!body) body = '<div class="pop-empty">Kayıt yok.</div>';
     if (q.trim()) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” için yeni iş aç</button>`;
   } else if (type === 'customer'){
@@ -474,11 +542,15 @@ function renderPicker(){
 
 /* Görev yazarken iş seçimi: mevcut işi seç, ya da arşivdeki teklif için
    sessizce bir iş kartı aç ve göreve onu bağla. */
-async function jobChoose(jobId, proje, musteri){
+async function jobChoose(jobId, proje, musteri, a42Id){
+  if (!jobId && a42Id){
+    const v = S.jobs.find(j => String(j.a42Id || '') === String(a42Id));
+    if (v) jobId = v.id;
+  }
   if (!jobId){
     jobId = await S.store.add('jobs', {
       customer: musteri || '', project: proje || '', archived: false,
-      ci: S.jobs.length % SWATCH.length, createdAt: Date.now()
+      a42Id: a42Id || '', ci: S.jobs.length % SWATCH.length, createdAt: Date.now()
     });
     ensureContact(musteri);
     note('İş kartı açıldı — ' + (proje || musteri));
@@ -666,12 +738,14 @@ function openSheet(){
     sheetBody.innerHTML = `<p class="lead">Şu an <b>yerel mod</b>: veriler yalnızca bu cihazda saklanıyor.</p>
       <p class="lead">Telefon ve bilgisayar arasında senkron için <code>firebase-config.js</code> dosyasına Firebase ayarlarını yapıştırın (kurulum adımları KURULUM.md dosyasında).</p>
       <p class="who">sürüm ${APP_VERSION}</p>
+      ${a42Alani()}
       <div class="row"><button class="btn" data-act="refresh">Güncellemeyi denetle</button>
       <button class="btn primary" data-act="close-sheet">Tamam</button></div>`;
   } else if (S.user){
     sheetBody.innerHTML = `<p class="lead">Bulut senkronu açık. Aynı hesapla girdiğiniz her cihazda aynı liste görünür — değişiklikler anında yansır, yenilemeye gerek yok.</p>
       <p class="who">${esc(S.user.email || S.user.uid)}</p>
       <p class="who">sürüm ${APP_VERSION} · ${(S.ref.c || []).length} müşteri · ${(S.ref.p || []).length} proje</p>
+      ${a42Alani()}
       <div class="row"><button class="btn" data-act="refresh">Güncellemeyi denetle</button></div>
       <div class="row"><button class="btn" data-act="signout">Çıkış yap</button>
       <button class="btn primary" data-act="close-sheet">Kapat</button></div>`;
@@ -686,6 +760,21 @@ function openSheet(){
   }
   sheet.hidden = false;
 }
+function a42Alani(){
+  const url = getSetting('a42url');
+  const n = a42Devam().length;
+  const durum = !url ? 'Tanımlı değil — A42 widget\u2019ındaki IZ_TAKIP_URL adresini yapıştırın.'
+    : S.a42.hata ? S.a42.hata
+    : n ? n + ' devam eden iş okundu.'
+    : 'Bağlandı, devam eden iş yok.';
+  return `<hr class="sep">
+    <label for="a-a42">A42 iş takip bağlantısı</label>
+    <input type="url" id="a-a42" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(url)}" autocomplete="off" spellcheck="false">
+    <p class="who">${esc(durum)}</p>
+    <div class="row"><button class="btn" data-act="a42-save">Kaydet ve bağlan</button>
+    <button class="btn ghost" data-act="a42-reload">Tazele</button></div>`;
+}
+
 const closeSheet = () => { sheet.hidden = true; };
 const authErr = m => { const e = document.getElementById('a-err'); if (e){ e.textContent = m; e.hidden = false; } };
 
@@ -732,7 +821,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'pop-close'){ closePicker(); return; }
   if (a === 'pop-all'){ if (S.picker){ S.picker.all = true; renderPicker(); } return; }
   if (a === 'pop-choose'){
-    if (S.picker && S.picker.type === 'job'){ jobChoose(b.dataset.job, b.dataset.val, b.dataset.cust); return; }
+    if (S.picker && S.picker.type === 'job'){ jobChoose(b.dataset.job, b.dataset.val, b.dataset.cust, b.dataset.a42); return; }
     pickerChoose(b.dataset.val, b.dataset.cust); return;
   }
   if (a === 'pop-del'){
@@ -752,6 +841,17 @@ document.addEventListener('click', async (e) => {
   if (a === 'seed'){ seed(); return; }
   if (a === 'install'){ doInstall(); return; }
   if (a === 'account'){ openSheet(); return; }
+  if (a === 'a42-save'){
+    const v = (document.getElementById('a-a42')?.value || '').trim();
+    if (v && !/^https:\/\/script\.google\.com\//.test(v)){ note('Adres https://script.google.com/… ile başlamalı.'); return; }
+    await setSetting('a42url', v);
+    S.a42 = { isler: [], at: 0, hata: '' };
+    await loadA42(false);
+    openSheet();
+    note(v ? (a42Devam().length + ' devam eden iş okundu.') : 'A42 bağlantısı kaldırıldı.');
+    return;
+  }
+  if (a === 'a42-reload'){ S.a42.at = 0; await loadA42(false); openSheet(); return; }
   if (a === 'close-sheet'){ closeSheet(); return; }
   if (a === 'refresh'){ closeSheet(); hardRefresh(); return; }
 
@@ -884,7 +984,7 @@ document.addEventListener('keydown', e => {
   if (e.target.id === 'pop-q'){
     e.preventDefault();
     const first = document.querySelector('#pop .pop-pick');
-    if (first && S.picker.type === 'job') jobChoose(first.dataset.job, first.dataset.val, first.dataset.cust);
+    if (first && S.picker.type === 'job') jobChoose(first.dataset.job, first.dataset.val, first.dataset.cust, first.dataset.a42);
     else if (first) pickerChoose(first.dataset.val, first.dataset.cust);
     else if (S.picker.type === 'job'){ const v = e.target.value.trim(); if (v) jobChoose(null, v, ''); }
     else if (S.picker.type === 'customer'){ const v = e.target.value.trim(); if (v){ ensureContact(v); pickerChoose(v); } }
@@ -900,11 +1000,12 @@ function bind(store, label, kind){
   S.unsub.forEach(u => { try { u(); } catch(e){} });
   S.unsub = [];
   S.store = store;
-  S.jobs = []; S.tasks = []; S.contacts = [];
+  S.jobs = []; S.tasks = []; S.contacts = []; S.settings = [];
   setSync(kind, label);
   S.unsub.push(store.subscribe('jobs', rows => { S.jobs = rows.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); render(); renderPicker(); }));
   S.unsub.push(store.subscribe('tasks', rows => { S.tasks = rows; render(); }));
   S.unsub.push(store.subscribe('contacts', rows => { S.contacts = rows; renderPicker(); }));
+  S.unsub.push(store.subscribe('settings', rows => { S.settings = rows; loadA42(true); }));
 }
 
 /* ============ açılış ============ */
@@ -936,9 +1037,9 @@ async function loadRef(force){
   } catch(e){}
 }
 loadRef(true);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) loadRef(false); });
-window.addEventListener('focus', () => loadRef(false));
-setInterval(() => { if (!document.hidden) loadRef(false); }, 3600000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden){ loadRef(false); loadA42(true); } });
+window.addEventListener('focus', () => { loadRef(false); loadA42(true); });
+setInterval(() => { if (!document.hidden){ loadRef(false); loadA42(true); } }, 3600000);
 
 (async function boot(){
   const cfg = window.IZO_FIREBASE || {};
