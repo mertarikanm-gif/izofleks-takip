@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19j";
+const APP_VERSION = "2026.09.19k";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -79,6 +79,7 @@ function firestoreStore(fs, uid){
 const S = {
   tab: 'week',
   weekStart: mondayOf(new Date()),
+  view: (() => { try { return localStorage.getItem('izo-view') === 'month' ? 'month' : 'week'; } catch(e){ return 'week'; } })(),
   jobs: [], tasks: [], contacts: [], settings: [],
   a42: { isler: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
   ref: { c: [], p: [] },   // teklif arşivinden gelen müşteri/proje rehberi (rehber.json)
@@ -237,12 +238,87 @@ function composerHtml(scope){
     <button class="btn ghost" data-act="cancel-composer">İptal</button></div></div>`;
 }
 
+/* ============ tatil takvimi ============
+   TR: resmî tatiller (arefe yarım günler ayrıca işaretli)
+   US: NYSE'nin kapalı olduğu günler — ABD piyasası takibi için */
+const TATIL_TR = {
+  '2026-01-01':'Yılbaşı',
+  '2026-03-19':'Ramazan Bayramı arefesi · yarım gün',
+  '2026-03-20':'Ramazan Bayramı 1. gün',
+  '2026-03-21':'Ramazan Bayramı 2. gün',
+  '2026-03-22':'Ramazan Bayramı 3. gün',
+  '2026-04-23':'Ulusal Egemenlik ve Çocuk Bayramı',
+  '2026-05-01':'Emek ve Dayanışma Günü',
+  '2026-05-19':'Atatürk\u2019ü Anma, Gençlik ve Spor Bayramı',
+  '2026-05-26':'Kurban Bayramı arefesi · yarım gün',
+  '2026-05-27':'Kurban Bayramı 1. gün',
+  '2026-05-28':'Kurban Bayramı 2. gün',
+  '2026-05-29':'Kurban Bayramı 3. gün',
+  '2026-05-30':'Kurban Bayramı 4. gün',
+  '2026-07-15':'Demokrasi ve Millî Birlik Günü',
+  '2026-08-30':'Zafer Bayramı',
+  '2026-10-28':'Cumhuriyet Bayramı arefesi · yarım gün',
+  '2026-10-29':'Cumhuriyet Bayramı',
+  '2027-01-01':'Yılbaşı',
+  '2027-03-08':'Ramazan Bayramı arefesi · yarım gün',
+  '2027-03-09':'Ramazan Bayramı 1. gün',
+  '2027-03-10':'Ramazan Bayramı 2. gün',
+  '2027-03-11':'Ramazan Bayramı 3. gün',
+  '2027-04-23':'Ulusal Egemenlik ve Çocuk Bayramı',
+  '2027-05-01':'Emek ve Dayanışma Günü',
+  '2027-05-15':'Kurban Bayramı arefesi · yarım gün',
+  '2027-05-16':'Kurban Bayramı 1. gün',
+  '2027-05-17':'Kurban Bayramı 2. gün',
+  '2027-05-18':'Kurban Bayramı 3. gün',
+  '2027-05-19':'Kurban Bayramı 4. gün · Gençlik ve Spor Bayramı',
+  '2027-07-15':'Demokrasi ve Millî Birlik Günü',
+  '2027-08-30':'Zafer Bayramı',
+  '2027-10-28':'Cumhuriyet Bayramı arefesi · yarım gün',
+  '2027-10-29':'Cumhuriyet Bayramı'
+};
+const TATIL_US = {
+  '2026-01-01':'New Year\u2019s Day',
+  '2026-01-19':'Martin Luther King Jr. Day',
+  '2026-02-16':'Washington\u2019s Birthday',
+  '2026-04-03':'Good Friday',
+  '2026-05-25':'Memorial Day',
+  '2026-06-19':'Juneteenth',
+  '2026-07-03':'Independence Day (4 Temmuz Cumartesi)',
+  '2026-09-07':'Labor Day',
+  '2026-11-26':'Thanksgiving',
+  '2026-12-25':'Christmas',
+  '2027-01-01':'New Year\u2019s Day',
+  '2027-01-18':'Martin Luther King Jr. Day',
+  '2027-02-15':'Washington\u2019s Birthday',
+  '2027-03-26':'Good Friday',
+  '2027-05-31':'Memorial Day',
+  '2027-06-18':'Juneteenth (19 Haziran Cumartesi)',
+  '2027-07-05':'Independence Day (4 Temmuz Pazar)',
+  '2027-09-06':'Labor Day',
+  '2027-11-25':'Thanksgiving',
+  '2027-12-24':'Christmas (25 Aralık Cumartesi)'
+};
+const YARIM = d => /arefesi/.test(TATIL_TR[d] || '');
+const tatilSinif = d => (TATIL_TR[d] ? (YARIM(d) ? ' htr yarim' : ' htr') : '') + (TATIL_US[d] ? ' hus' : '');
+function tatilRozet(d){
+  let h = '';
+  if (TATIL_TR[d]) h += `<span class="hchip tr" title="${esc(TATIL_TR[d])}">TR</span>`;
+  if (TATIL_US[d]) h += `<span class="hchip us" title="ABD piyasası kapalı — ${esc(TATIL_US[d])}">ABD</span>`;
+  return h;
+}
+function tatilAd(d){
+  const a = [];
+  if (TATIL_TR[d]) a.push(TATIL_TR[d]);
+  if (TATIL_US[d]) a.push('ABD piyasası kapalı — ' + TATIL_US[d]);
+  return a.join(' · ');
+}
+
 function weekView(){
   const start = S.weekStart, end = addDays(start, 6), t0 = todayIso();
   const late = lateTasks();
   let h = `<div class="weekbar">
     <div><h2>${esc(rangeLabel(start, end))}</h2><div class="kw">${weekNo(start)}. HAFTA</div></div>
-    <div class="navbtns">
+    <div class="navbtns">${gorunumAnahtari()}
       <button class="btn" data-act="today">Bu hafta</button>
       <button class="btn icon" data-act="week" data-v="-1" aria-label="Önceki hafta">‹</button>
       <button class="btn icon" data-act="week" data-v="1" aria-label="Sonraki hafta">›</button>
@@ -269,8 +345,8 @@ function weekView(){
     const d = addDays(start, i), di = iso(d), list = tasksOfDay(di);
     const open = S.tasks.filter(t => t.day === di && !t.done).length;
     const composing = S.composer && S.composer.scope === 'week' && S.composer.day === di;
-    h += `<section class="day${i > 4 ? ' weekend' : ''}${di === t0 ? ' today' : ''}">
-      <div class="day-h"><span class="dn">${DAY_FULL[i]}</span><span class="dd">${pad(d.getDate())}.${pad(d.getMonth() + 1)}</span>${open ? `<span class="cnt">${open}</span>` : ''}</div>
+    h += `<section class="day${i > 4 ? ' weekend' : ''}${di === t0 ? ' today' : ''}${tatilSinif(di)}" ${tatilAd(di) ? `title="${esc(tatilAd(di))}"` : ''}>
+      <div class="day-h"><span class="dn">${DAY_FULL[i]}</span><span class="dd">${pad(d.getDate())}.${pad(d.getMonth() + 1)}</span>${tatilRozet(di)}${open ? `<span class="cnt">${open}</span>` : ''}</div>
       <div class="day-b" data-drop="${di}">${list.map(t => taskHtml(t)).join('')}${composing ? composerHtml('week') : ''}</div>
       <div class="day-f">${composing ? '' : `<button class="addlink" data-act="open-composer" data-scope="week" data-day="${di}">+ görev</button>`}</div>
     </section>`;
@@ -302,6 +378,61 @@ function undatedView(){
   h += composing ? composerHtml('undated') : '';
   h += `</div>`;
   return h;
+}
+
+function gorunumAnahtari(){
+  return `<span class="vsw">
+    <button class="btn${S.view === 'week' ? ' primary' : ''}" data-act="setview" data-v="week">Hafta</button>
+    <button class="btn${S.view === 'month' ? ' primary' : ''}" data-act="setview" data-v="month">Ay</button>
+  </span>`;
+}
+
+function monthView(){
+  const ay = new Date(S.weekStart.getFullYear(), S.weekStart.getMonth(), 1);
+  const ilk = mondayOf(ay), t0 = todayIso();
+  const son = new Date(ay.getFullYear(), ay.getMonth() + 1, 0);
+  const hafta = Math.ceil((((son - ilk) / 86400000) + 1) / 7);
+  let h = `<div class="weekbar">
+    <div><h2>${MONTH[ay.getMonth()]} ${ay.getFullYear()}</h2><div class="kw">AY GÖRÜNÜMÜ</div></div>
+    <div class="navbtns">${gorunumAnahtari()}
+      <button class="btn" data-act="today">Bu ay</button>
+      <button class="btn icon" data-act="month" data-v="-1" aria-label="Önceki ay">‹</button>
+      <button class="btn icon" data-act="month" data-v="1" aria-label="Sonraki ay">›</button>
+      <button class="btn" data-act="toggle-done" aria-pressed="${S.showDone}">Bitenler</button>
+    </div></div>`;
+
+  h += '<div class="monthhead">' + DAY_FULL.map(d => `<div>${d}</div>`).join('') + '</div>';
+  h += '<div class="monthgrid">';
+  for (let i = 0; i < hafta * 7; i++){
+    const d = addDays(ilk, i), di = iso(d);
+    const disi = d.getMonth() !== ay.getMonth();
+    const list = tasksOfDay(di);
+    const composing = S.composer && S.composer.scope === 'week' && S.composer.day === di;
+    h += `<section class="day mday${d.getDay() === 0 || d.getDay() === 6 ? ' weekend' : ''}${di === t0 ? ' today' : ''}${disi ? ' disi' : ''}${tatilSinif(di)}" ${tatilAd(di) ? `title="${esc(tatilAd(di))}"` : ''}>
+      <div class="day-h"><span class="dn">${d.getDate()}</span>${tatilRozet(di)}${list.length ? `<span class="cnt">${list.length}</span>` : ''}</div>
+      <div class="day-b" data-drop="${di}">${list.map(t => taskHtml(t)).join('')}${composing ? composerHtml('week') : ''}</div>
+      <div class="day-f">${composing ? '' : `<button class="addlink" data-act="open-composer" data-scope="week" data-day="${di}">+</button>`}</div>
+    </section>`;
+  }
+  h += '</div>';
+
+  const n = undatedTasks().length;
+  h += `<div class="dropstrip" data-drop="">
+    <span class="ds-t">Tarihsiz</span>
+    <span class="ds-n">${n ? n + ' görev' : 'boş'}</span>
+    <span class="ds-hint">buraya bırak</span>
+    <button class="btn ghost" data-act="tab" data-v="undated">Aç</button>
+  </div>`;
+  h += tatilLegend();
+  return h;
+}
+
+function tatilLegend(){
+  return `<div class="hleg">
+    <span><i class="sw tr"></i> Resmî tatil (TR)</span>
+    <span><i class="sw yarim"></i> Arefe · yarım gün</span>
+    <span><i class="sw us"></i> ABD piyasası kapalı</span>
+  </div>`;
 }
 
 function jobsView(){
@@ -655,7 +786,8 @@ function render(){
   const undN = S.tasks.filter(t => !t.day && !t.done).length;
   const undRozet = document.getElementById('und-n');
   if (undRozet){ undRozet.textContent = undN || ''; undRozet.hidden = !undN; }
-  main.innerHTML = S.tab === 'week' ? weekView() : S.tab === 'undated' ? undatedView() : jobsView();
+  main.innerHTML = S.tab === 'week' ? (S.view === 'month' && window.innerWidth >= 1000 ? monthView() : weekView())
+    : S.tab === 'undated' ? undatedView() : jobsView();
   const txt = document.getElementById('c-text');
   if (txt){ txt.value = S.draft.text; txt.focus(); try { txt.setSelectionRange(txt.value.length, txt.value.length); } catch(e){} }
   const jc = document.getElementById('j-cust'), jp = document.getElementById('j-proj');
@@ -802,6 +934,16 @@ document.addEventListener('click', async (e) => {
 
   if (a === 'tab'){ S.tab = b.dataset.v; S.composer = null; render(); return; }
   if (a === 'week'){ S.weekStart = addDays(S.weekStart, 7 * parseInt(b.dataset.v, 10)); S.composer = null; render(); return; }
+  if (a === 'month'){
+    const d = new Date(S.weekStart.getFullYear(), S.weekStart.getMonth() + parseInt(b.dataset.v, 10), 1);
+    S.weekStart = mondayOf(d).getMonth() === d.getMonth() ? mondayOf(d) : d;
+    S.composer = null; render(); return;
+  }
+  if (a === 'setview'){
+    S.view = b.dataset.v; S.composer = null;
+    try { localStorage.setItem('izo-view', S.view); } catch(e){}
+    render(); return;
+  }
   if (a === 'today'){ S.weekStart = mondayOf(new Date()); S.composer = null; render(); return; }
   if (a === 'toggle-done'){ S.showDone = !S.showDone; render(); return; }
   if (a === 'toggle-arch'){ S.showArchived = !S.showArchived; render(); return; }
