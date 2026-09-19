@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19h";
+const APP_VERSION = "2026.09.19i";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -224,10 +224,11 @@ function taskHtml(t, o = {}){
 }
 
 function composerHtml(scope){
-  const jobs = activeJobs();
-  const opts = jobs.map(j => `<option value="${j.id}"${S.draft.job === j.id ? ' selected' : ''}>${esc(jobLabel(j))}</option>`).join('');
+  const sec = jobById(S.draft.job);
   const jobSel = scope.startsWith('job:') ? '' :
-    `<select id="c-job" aria-label="İş seç">${jobs.length ? '' : '<option value="">— önce iş ekleyin —</option>'}${opts}</select>`;
+    `<button type="button" class="jobpick${sec ? '' : ' bos'}" id="c-job" data-act="pick" data-type="job"
+       aria-label="İş / proje seç" title="Devam eden işler ve teklif arşivinden seç">
+       <span class="jp-nm">${sec ? esc(jobLabel(sec)) : 'İş / proje seç…'}</span>${ICON_LIST}</button>`;
   const daySel = (scope === 'week' || scope === 'undated') ? '' : `<input type="date" id="c-day" value="${esc(S.draft.day || '')}" aria-label="Gün">`;
   return `<div class="composer">${jobSel}${daySel}
     <input type="text" id="c-text" placeholder="Ne yapılacak?" autocomplete="off" aria-label="Görev">
@@ -389,7 +390,30 @@ function renderPicker(){
     ? `<div class="pop-grp">${label}</div>` + rows.slice(0, cap).map(rowFn).join('') + more(rows.length - cap)
     : '';
 
-  if (type === 'customer'){
+  if (type === 'job'){
+    title = 'İş / Proje';
+    const acik = S.jobs.filter(j => !j.archived);
+    const ars  = S.jobs.filter(j =>  j.archived);
+    const jrow = j => `<div class="pop-row${j.archived ? '' : ' live'}"><button class="pop-pick" data-act="pop-choose" data-job="${j.id}">
+      <span class="pop-nm">${esc(j.project || j.customer || 'İsimsiz iş')}</span>
+      <span class="pop-sub">${[j.customer, tasksOfJob(j.id).length ? tasksOfJob(j.id).length + ' görev' : ''].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
+    // arşivdeki tekliflerden, zaten iş kartı olmayanlar
+    const varOlan = new Set(S.jobs.map(j => norm(j.project)));
+    const teklif = (S.ref.p || [])
+      .filter(([c, p]) => p && !varOlan.has(norm(p)))
+      .map(([c, p, k, y]) => ({ customer: c || '', name: p, kind: KIND[k] || '', year: y || '' }))
+      .sort((a, b) => (b.year || '').localeCompare(a.year || '') || a.name.localeCompare(b.name, 'tr'));
+    const trow = p => `<div class="pop-row"><button class="pop-pick" data-act="pop-choose" data-val="${esc(p.name)}" data-cust="${esc(p.customer)}">
+      <span class="pop-nm">${esc(p.name)}</span>
+      <span class="pop-sub">${[p.customer, p.kind, p.year].filter(Boolean).map(esc).join(' · ')}</span></button></div>`;
+    const fj = a => a.filter(j => hit(j.project) || hit(j.customer));
+    const fp = a => a.filter(p => hit(p.name) || hit(p.customer));
+    body = block('Devam eden işler', fj(acik), jrow, CAP)
+         + block('Arşivlenmiş işler', fj(ars), jrow, 20)
+         + block('Teklif arşivi', fp(teklif), trow, CAP);
+    if (!body) body = '<div class="pop-empty">Kayıt yok.</div>';
+    if (q.trim()) addable = `<button class="pop-add" data-act="pop-add">+ “${esc(q.trim())}” için yeni iş aç</button>`;
+  } else if (type === 'customer'){
     const L = customerList();
     title = 'Müşteri / Mimar';
     const row = c => `<div class="pop-row${c.src === 'job' ? ' live' : ''}"><button class="pop-pick" data-act="pop-choose" data-val="${esc(c.name)}">
@@ -446,6 +470,24 @@ function renderPicker(){
   const qi = document.getElementById('pop-q');
   qi.focus();
   try { qi.setSelectionRange(qi.value.length, qi.value.length); } catch(e){}
+}
+
+/* Görev yazarken iş seçimi: mevcut işi seç, ya da arşivdeki teklif için
+   sessizce bir iş kartı aç ve göreve onu bağla. */
+async function jobChoose(jobId, proje, musteri){
+  if (!jobId){
+    jobId = await S.store.add('jobs', {
+      customer: musteri || '', project: proje || '', archived: false,
+      ci: S.jobs.length % SWATCH.length, createdAt: Date.now()
+    });
+    ensureContact(musteri);
+    note('İş kartı açıldı — ' + (proje || musteri));
+  }
+  S.draft.job = jobId;
+  const t = document.getElementById('c-text');
+  if (t) S.draft.text = t.value;
+  closePicker();
+  render();
 }
 
 function pickerChoose(val, cust){
@@ -562,7 +604,7 @@ function openComposer(scope, day){
   S.composer = { scope, day };
   S.draft.text = '';
   S.draft.day = day || todayIso();
-  if (!S.draft.job){ const a = activeJobs(); S.draft.job = a.length ? a[0].id : ''; }
+  if (!S.draft.job || !jobById(S.draft.job)){ const a = activeJobs(); S.draft.job = a.length ? a[0].id : ''; }
   render();
 }
 
@@ -577,10 +619,9 @@ function saveTask(){
     const de = document.getElementById('c-day');
     day = de && de.value ? de.value : '';
   } else {
-    const je = document.getElementById('c-job');
-    jobId = je ? je.value : '';
+    jobId = S.draft.job || '';
     day = S.composer.day;
-    if (!jobId){ note('Önce bir iş ekleyin.'); return; }
+    if (!jobId || !jobById(jobId)){ note('Önce bir iş / proje seçin.'); document.getElementById('c-job')?.click(); return; }
   }
   S.draft.job = jobId;
   S.store.add('tasks', { jobId, day: day || '', text, done: false, createdAt: Date.now() });
@@ -690,7 +731,10 @@ document.addEventListener('click', async (e) => {
   if (a === 'pick'){ openPicker(b.dataset.type, b); return; }
   if (a === 'pop-close'){ closePicker(); return; }
   if (a === 'pop-all'){ if (S.picker){ S.picker.all = true; renderPicker(); } return; }
-  if (a === 'pop-choose'){ pickerChoose(b.dataset.val, b.dataset.cust); return; }
+  if (a === 'pop-choose'){
+    if (S.picker && S.picker.type === 'job'){ jobChoose(b.dataset.job, b.dataset.val, b.dataset.cust); return; }
+    pickerChoose(b.dataset.val, b.dataset.cust); return;
+  }
   if (a === 'pop-del'){
     const c = S.contacts.find(x => x.id === id);
     if (c && confirm(`“${c.name}” rehberden silinsin mi? (İşler etkilenmez)`)) S.store.remove('contacts', id);
@@ -699,6 +743,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'pop-add'){
     const v = (document.getElementById('pop-q')?.value || '').trim();
     if (!v) return;
+    if (S.picker && S.picker.type === 'job'){ jobChoose(null, v, ''); return; }
     ensureContact(v);
     pickerChoose(v);
     return;
@@ -818,7 +863,6 @@ document.addEventListener('mousedown', e => {
   closePicker();
 });
 document.addEventListener('change', e => {
-  if (e.target.id === 'c-job') S.draft.job = e.target.value;
   if (e.target.id === 'c-day') S.draft.day = e.target.value;
 });
 document.addEventListener('keydown', e => {
@@ -840,7 +884,9 @@ document.addEventListener('keydown', e => {
   if (e.target.id === 'pop-q'){
     e.preventDefault();
     const first = document.querySelector('#pop .pop-pick');
-    if (first) pickerChoose(first.dataset.val, first.dataset.cust);
+    if (first && S.picker.type === 'job') jobChoose(first.dataset.job, first.dataset.val, first.dataset.cust);
+    else if (first) pickerChoose(first.dataset.val, first.dataset.cust);
+    else if (S.picker.type === 'job'){ const v = e.target.value.trim(); if (v) jobChoose(null, v, ''); }
     else if (S.picker.type === 'customer'){ const v = e.target.value.trim(); if (v){ ensureContact(v); pickerChoose(v); } }
     return;
   }
