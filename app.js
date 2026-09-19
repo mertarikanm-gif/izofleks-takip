@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.19o";
+const APP_VERSION = "2026.09.19p";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -325,11 +325,25 @@ const TATIL_US = {
 };
 const YARIM = d => /arefesi/.test(TATIL_TR[d] || '');
 const tatilSinif = d => (TATIL_TR[d] ? (YARIM(d) ? ' htr yarim' : ' htr') : '') + (TATIL_US[d] ? ' hus' : '');
+const KISA_TR = {"Yılbaşı": "Yılbaşı", "Ramazan Bayramı arefesi · yarım gün": "Arefe · yarım gün", "Ramazan Bayramı 1. gün": "Ramazan B. 1", "Ramazan Bayramı 2. gün": "Ramazan B. 2", "Ramazan Bayramı 3. gün": "Ramazan B. 3", "Ulusal Egemenlik ve Çocuk Bayramı": "23 Nisan", "Emek ve Dayanışma Günü": "1 Mayıs", "Atatürk’ü Anma, Gençlik ve Spor Bayramı": "19 Mayıs", "Kurban Bayramı arefesi · yarım gün": "Arefe · yarım gün", "Kurban Bayramı 1. gün": "Kurban B. 1", "Kurban Bayramı 2. gün": "Kurban B. 2", "Kurban Bayramı 3. gün": "Kurban B. 3", "Kurban Bayramı 4. gün": "Kurban B. 4", "Kurban Bayramı 4. gün · Gençlik ve Spor Bayramı": "Kurban B. 4 · 19 Mayıs", "Demokrasi ve Millî Birlik Günü": "15 Temmuz", "Zafer Bayramı": "Zafer Bayramı", "Cumhuriyet Bayramı arefesi · yarım gün": "Arefe · yarım gün", "Cumhuriyet Bayramı": "Cumhuriyet B."};
+const KISA_US = {"New Year’s Day": "New Year", "Martin Luther King Jr. Day": "MLK Day", "Washington’s Birthday": "Washington", "Good Friday": "Good Friday", "Memorial Day": "Memorial Day", "Juneteenth": "Juneteenth", "Juneteenth (19 Haziran Cumartesi)": "Juneteenth", "Independence Day (4 Temmuz Cumartesi)": "Independence Day", "Independence Day (4 Temmuz Pazar)": "Independence Day", "Labor Day": "Labor Day", "Thanksgiving": "Thanksgiving", "Christmas": "Christmas", "Christmas (25 Aralık Cumartesi)": "Christmas"};
+const kisaTr = d => KISA_TR[TATIL_TR[d]] || TATIL_TR[d] || '';
+const kisaUs = d => KISA_US[TATIL_US[d]] || TATIL_US[d] || '';
+
 function tatilRozet(d){
   let h = '';
   if (TATIL_TR[d]) h += `<span class="hchip tr" title="${esc(TATIL_TR[d])}">TR</span>`;
   if (TATIL_US[d]) h += `<span class="hchip us" title="ABD piyasası kapalı — ${esc(TATIL_US[d])}">ABD</span>`;
   return h;
+}
+
+/* gün hücresinde tatil adı — kisa=true ise ay görünümü için kısaltılmış */
+function tatilSatir(d, kisa){
+  if (!TATIL_TR[d] && !TATIL_US[d]) return '';
+  let h = '<div class="hname">';
+  if (TATIL_TR[d]) h += `<i class="${YARIM(d) ? 'yarim' : 'tr'}" title="${esc(TATIL_TR[d])}">${esc(kisa ? kisaTr(d) : TATIL_TR[d])}</i>`;
+  if (TATIL_US[d]) h += `<i class="us" title="ABD piyasası kapalı — ${esc(TATIL_US[d])}">ABD · ${esc(kisa ? kisaUs(d) : TATIL_US[d])}</i>`;
+  return h + '</div>';
 }
 function tatilAd(d){
   const a = [];
@@ -371,7 +385,8 @@ function weekView(){
     const open = S.tasks.filter(t => t.day === di && !t.done).length;
     const composing = S.composer && S.composer.scope === 'week' && S.composer.day === di;
     h += `<section class="day${i > 4 ? ' weekend' : ''}${di === t0 ? ' today' : ''}${tatilSinif(di)}" ${tatilAd(di) ? `title="${esc(tatilAd(di))}"` : ''}>
-      <div class="day-h"><span class="dn">${DAY_FULL[i]}</span><span class="dd">${pad(d.getDate())}.${pad(d.getMonth() + 1)}</span>${tatilRozet(di)}${open ? `<span class="cnt">${open}</span>` : ''}</div>
+      <div class="day-h"><span class="dn">${DAY_FULL[i]}</span><span class="dd">${pad(d.getDate())}.${pad(d.getMonth() + 1)}</span>${open ? `<span class="cnt">${open}</span>` : ''}</div>
+      ${tatilSatir(di, false)}
       <div class="day-b" data-drop="${di}">${list.map(t => taskHtml(t)).join('')}${composing ? composerHtml('week') : ''}</div>
       <div class="day-f">${composing ? '' : `<button class="addlink" data-act="open-composer" data-scope="week" data-day="${di}">+ görev</button>`}</div>
     </section>`;
@@ -434,7 +449,8 @@ function monthView(){
     const list = tasksOfDay(di);
     const composing = S.composer && S.composer.scope === 'week' && S.composer.day === di;
     h += `<section class="day mday${d.getDay() === 0 || d.getDay() === 6 ? ' weekend' : ''}${di === t0 ? ' today' : ''}${disi ? ' disi' : ''}${tatilSinif(di)}" ${tatilAd(di) ? `title="${esc(tatilAd(di))}"` : ''}>
-      <div class="day-h"><span class="dn">${d.getDate()}</span>${tatilRozet(di)}${list.length ? `<span class="cnt">${list.length}</span>` : ''}</div>
+      <div class="day-h"><span class="dn">${d.getDate()}</span>${list.length ? `<span class="cnt">${list.length}</span>` : ''}</div>
+      ${tatilSatir(di, true)}
       <div class="day-b" data-drop="${di}">${list.map(t => taskHtml(t)).join('')}${composing ? composerHtml('week') : ''}</div>
       <div class="day-f">${composing ? '' : `<button class="addlink" data-act="open-composer" data-scope="week" data-day="${di}">+</button>`}</div>
     </section>`;

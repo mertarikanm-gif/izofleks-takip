@@ -427,6 +427,7 @@ details.data p{margin:0;font-size:12.5px;color:var(--ink-2);}
 .day.htr .day-h{background:var(--tr-soft2);}
 .day.htr.yarim{background:var(--tr-soft3);}
 .day.hus{box-shadow:inset 3px 0 0 var(--us);}
+.day.htr.hus{box-shadow:inset 3px 0 0 var(--us);}
 .day.htr.today, .day.hus.today{border-color:var(--accent);}
 .hchip{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.06em;font-weight:600;
   padding:1px 4px;border-radius:4px;line-height:1.4;}
@@ -476,3 +477,14 @@ details.data p{margin:0;font-size:12.5px;color:var(--ink-2);}
 .voice .row{display:flex;gap:8px;margin-top:12px;}
 .voice .row .btn{flex:1;text-align:center;}
 .toast-undo{margin-left:12px;flex:0 0 auto;font-weight:600;color:var(--accent-ink);text-decoration:underline;white-space:nowrap;}
+
+/* tatil adı satırı */
+.hname{display:flex;flex-direction:column;gap:2px;padding:4px 10px 0;}
+.hname i{font-style:normal;font-family:var(--f-mono);font-size:9.5px;line-height:1.35;
+  letter-spacing:.04em;text-transform:uppercase;font-weight:600;
+  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hname i.tr{color:var(--tr);}
+.hname i.yarim{color:var(--tr-y);}
+.hname i.us{color:var(--us);}
+.mday .hname{padding:3px 8px 0;}
+.mday .hname i{font-size:8.5px;letter-spacing:.02em;}
