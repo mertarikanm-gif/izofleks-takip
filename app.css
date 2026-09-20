@@ -698,3 +698,12 @@ html,body{overscroll-behavior-x:contain;}
 .mbos h3{font-family:var(--f-disp);font-weight:600;font-size:16px;margin:0 0 8px;}
 .mbos p{margin:0 auto 10px;max-width:44ch;font-size:13px;color:var(--ink-2);line-height:1.55;}
 .mbos .mbos-n{font-size:11.5px;color:var(--ink-3);}
+
+/* ============ İş Takip (telefon) ============ */
+.itwrap{padding:12px 0 26px;}
+.itbas{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;margin:18px 2px 9px;}
+.itbas:first-of-type{margin-top:4px;}
+.itnot{background:var(--warn-soft);border:1px solid #EFCEC6;border-radius:9px;padding:9px 12px;
+  font-size:12.5px;color:var(--warn);margin-bottom:12px;}
+.itlink{color:var(--accent-ink);font-weight:600;text-decoration:underline;font-size:12.5px;}

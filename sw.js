@@ -2,7 +2,7 @@
    Uygulama kabuğunu önbelleğe alır: internet yokken de açılır.
    Veri senkronu Firestore'un kendi çevrimdışı önbelleğiyle çalışır. */
 
-const CACHE = 'izo-takip-v49';
+const CACHE = 'izo-takip-v51';
 const SHELL = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const SHELL = [
   './rehber.json',
   './icon-192.png',
   './icon-512.png',
+  './icon-maskable-512.png',
   './apple-touch-icon.png'
 ];
 
