@@ -620,9 +620,11 @@ html,body{overscroll-behavior-x:contain;}
 .backbtn:active{transform:scale(.96);}
 @media (max-width:420px){.backbtn .bt{display:none;}.backbtn{padding:0 9px;}}
 /* logo = ana ekran */
-.topbar .brand{cursor:default;}
+.topbar .brand{cursor:default;transform-origin:left center;transition:transform .15s ease,opacity .15s ease;}
 .topbar .brand.tiklanir{cursor:pointer;}
-.topbar .brand.tiklanir:hover{opacity:.82;}
+.topbar .brand.tiklanir:hover{opacity:1;transform:scale(1.08);}
+.topbar .brand.tiklanir:active{transform:scale(1.02);}
+@media (hover:none){ .topbar .brand.tiklanir:hover{transform:none;} }
 .ekranad{font-family:var(--f-disp);font-weight:600;font-size:14.5px;color:var(--bar-ink);
   white-space:nowrap;margin-left:2px;}
 @media (max-width:560px){.ekranad{display:none;}}
@@ -677,6 +679,8 @@ html,body{overscroll-behavior-x:contain;}
 .mr-1{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:3px;}
 .mtar{font-family:var(--f-mono);font-size:11px;color:var(--ink-3);}
 .mr-2{font-size:13.5px;font-weight:600;line-height:1.3;overflow-wrap:anywhere;}
+/* Stok satırında başlık = ürün kodu: koyu, kalın, mono */
+.mr-2.mkod{font-family:var(--f-mono);font-size:15px;font-weight:800;letter-spacing:.01em;color:var(--ink);}
 .mr-3{display:flex;align-items:baseline;gap:10px;margin-top:3px;}
 .mno{font-family:var(--f-mono);font-size:10.5px;color:var(--ink-3);flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}

@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term8";
+const APP_VERSION = "2026.09.20-term9";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2075,9 +2075,9 @@ function stokView(){
   gor.forEach(r => {
     h += `<div class="mrow ${r.f === 'tars' ? 'gd' : 'gl'}">
       <div class="mr-1"><span class="myon ${r.f === 'tars' ? 'g' : 'l'}">${r.f === 'tars' ? 'TARS' : 'İZOFLEKS'}</span>
-        <span class="mtar">${esc(r.k || '')}</span>
+        <span class="mtar">${esc(r.c || '')}${r.d ? ' · ' + esc(r.d) : ''}</span>
         <span class="mrz ${(+r.a || 0) > 0 ? 'ok' : 'ks'}">${(+r.a || 0)} ad</span></div>
-      <div class="mr-2">${esc(r.c || '')}${r.d ? ' · ' + esc(r.d) : ''}</div>
+      <div class="mr-2 mkod">${esc(r.k || '')}</div>
       <div class="mr-3"><span class="mno">${esc([r.e, r.r].filter(Boolean).join(' · '))}</span>
         <span class="mtut">${r.b ? esc(String(r.b)) + ' m' : ''}${r.kg ? `<em>${(+r.kg).toLocaleString('tr-TR',{maximumFractionDigits:1})} kg</em>` : ''}</span></div>
       ${r.n ? `<div class="mr-4">${esc(r.n)}</div>` : ''}
