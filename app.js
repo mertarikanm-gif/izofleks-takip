@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term3";
+const APP_VERSION = "2026.09.20-term4";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2064,6 +2064,33 @@ function stokView(){
   return h;
 }
 
+/* ============ geri hareketi / geri tuşu ============
+   Telefonda kenardan geri kaydırma ve Android geri tuşu, uygulamayı kapatmak
+   yerine ana ekrana dönsün. Ana ekrandan geri → uygulamadan çıkış (normal davranış). */
+let _gecmisDerinlik = 0;
+function ekranAc(tab){
+  const oncekiHome = S.tab === 'home';
+  S.tab = tab;
+  if (oncekiHome && tab !== 'home'){
+    try { history.pushState({ term: tab }, '', '?v=' + tab); _gecmisDerinlik++; } catch(e){}
+  }
+  render();
+}
+function anaEkrana(gecmisten){
+  if (S.tab === 'home') return;
+  S.tab = 'home';
+  S.composer = null;
+  if (!gecmisten && _gecmisDerinlik > 0){
+    _gecmisDerinlik--;
+    try { history.back(); return; } catch(e){}   /* popstate render'ı tetikler */
+  }
+  render();
+}
+window.addEventListener('popstate', () => {
+  if (_gecmisDerinlik > 0) _gecmisDerinlik--;
+  if (S.tab !== 'home'){ S.tab = 'home'; S.composer = null; render(); }
+});
+
 /* ============ render ============ */
 function render(){
   const gorevde = S.tab === 'week' || S.tab === 'undated' || S.tab === 'jobs';
@@ -2278,14 +2305,14 @@ document.addEventListener('click', async (e) => {
   if (!b) return;
   const a = b.dataset.act, id = b.dataset.id;
 
-  if (a === 'tab'){ S.tab = b.dataset.v; S.gorevTab = b.dataset.v; S.composer = null; render(); return; }
-  if (a === 'home'){ S.tab = 'home'; S.composer = null; render(); return; }
+  if (a === 'tab'){ S.gorevTab = b.dataset.v; S.composer = null; ekranAc(b.dataset.v); return; }
+  if (a === 'home'){ anaEkrana(false); return; }
   if (a === 'kart'){
     const k = b.dataset.v;
-    if (k === 'gorev'){ S.tab = S.gorevTab || 'week'; S.composer = null; render(); return; }
-    if (k === 'muh'){ S.tab = 'muh'; render(); return; }
-    if (k === 'istakip'){ S.tab = 'istakip'; loadA42(true); render(); return; }
-    if (k === 'stok'){ S.tab = 'stok'; render(); return; }
+    if (k === 'gorev'){ S.composer = null; ekranAc(S.gorevTab || 'week'); return; }
+    if (k === 'muh'){ ekranAc('muh'); return; }
+    if (k === 'istakip'){ loadA42(true); ekranAc('istakip'); return; }
+    if (k === 'stok'){ ekranAc('stok'); return; }
     note('Bu bölüm şimdilik bilgisayardaki TERM\'de.');
     return;
   }
