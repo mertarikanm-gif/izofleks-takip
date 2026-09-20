@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20i";
+const APP_VERSION = "2026.09.20j";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -597,8 +597,8 @@ const blankHtml = () => `<div class="blank"><h3>Henüz iş yok</h3>
   <div class="row"><button class="btn primary" data-act="open-job-form">+ Yeni iş ekle</button>
   <button class="btn" data-act="seed">Örnek işlerle dene</button></div></div>`;
 
-const dataPanelHtml = () => `<details class="data"><summary>Veri · dışa/içe aktarım (A42)</summary><div class="inner">
-  <p>A42 widget’ına taşımak ya da yedek almak için: aşağıdaki JSON tüm işleri ve görevleri içerir. Yapıştırıp <b>İçe aktar</b> derseniz kayıtlar mevcutlara eklenir.</p>
+const dataPanelHtml = () => `<details class="data"><summary>Veri · dışa/içe aktarım (TERM)</summary><div class="inner">
+  <p>TERM’e taşımak ya da yedek almak için: aşağıdaki JSON tüm işleri ve görevleri içerir. Yapıştırıp <b>İçe aktar</b> derseniz kayıtlar mevcutlara eklenir.</p>
   <textarea id="io" spellcheck="false" placeholder="JSON"></textarea>
   <div class="navbtns" style="margin-left:0">
     <button class="btn" data-act="export">Dışa aktar</button>
@@ -1102,7 +1102,7 @@ async function komutCoz(metin){
     '    Ofis / İdari: ofis işleri, evrak, kırtasiye, araç, resmî yazışma.',
     '    Tedarikçi: tedarikçi arama, fiyat isteme, sipariş takibi, taşeron.',
     '    Kişisel: kişisel hatırlatmalar.',
-    '    Dijital: web sitesi, Wix, reklam/tanıtım mailleri, sosyal medya, katalog dijital işleri VE yazılım tarafı — uygulama (app), A42 widget, yapay zeka / AI ile ilgili her iş.',
+    '    Dijital: web sitesi, Wix, reklam/tanıtım mailleri, sosyal medya, katalog dijital işleri VE yazılım tarafı — uygulama (app), TERM programı, yapay zeka / AI ile ilgili her iş.',
     '- gun: tarih anlaşılmadıysa null.',
     '- sabit: "sabit", "sabitle", "pinle" geçiyorsa true; görev takvime girmez, gun null olur.',
     '- metin: kısa Türkçe açıklama, komut kalıbı olmadan (örn. "boya yapılacak").',
@@ -1585,15 +1585,15 @@ function renderPicker(){
     const fb = a => a.filter(x => hit(x.proje) || hit(x.musteri));
 
     const genBlok = block('Genel · projeden bağımsız', fg(gen), grow, 20);
-    let kalan = block('Devam eden işler · A42', fa(devam), arow, CAP)
-              + block('Bekleyen teklifler · A42', fb(bekleyen), brow, CAP)
+    let kalan = block('Devam eden işler · TERM', fa(devam), arow, CAP)
+              + block('Bekleyen teklifler · TERM', fb(bekleyen), brow, CAP)
               + block('Uygulamada açılan işler', fj(yerel), jrow, 30)
               + block('Teklif arşivi', fp(teklif), trow, CAP);
     if (!devam.length){
       const url = getSetting('a42url');
       kalan = `<div class="pop-note">${url
-        ? (S.a42.hata ? esc(S.a42.hata) : 'A42\u2019de devam eden iş yok.')
-        : 'A42 bağlantısı tanımlı değil — senkron penceresinden ekleyin.'}</div>` + kalan;
+        ? (S.a42.hata ? esc(S.a42.hata) : 'TERM\u2019de devam eden iş yok.')
+        : 'TERM bağlantısı tanımlı değil — senkron penceresinden ekleyin.'}</div>` + kalan;
     }
     body = genBlok + kalan;
     if (!body) body = '<div class="pop-empty">Kayıt yok.</div>';
@@ -1911,12 +1911,12 @@ function openSheet(){
 function a42Alani(){
   const url = getSetting('a42url');
   const n = a42Devam().length;
-  const durum = !url ? 'Tanımlı değil — A42 widget\u2019ındaki IZ_TAKIP_URL adresini yapıştırın.'
+  const durum = !url ? 'Tanımlı değil — TERM\u2019deki IZ_TAKIP_URL adresini yapıştırın.'
     : S.a42.hata ? S.a42.hata
     : n ? n + ' devam eden iş okundu.'
     : 'Bağlandı, devam eden iş yok.';
   return `<hr class="sep">
-    <label for="a-a42">A42 iş takip bağlantısı</label>
+    <label for="a-a42">TERM iş takip bağlantısı</label>
     <input type="url" id="a-a42" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(url)}" autocomplete="off" spellcheck="false">
     <p class="who">${esc(durum)}</p>
     <div class="row"><button class="btn" data-act="a42-save">Kaydet ve bağlan</button>
