@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term7";
+const APP_VERSION = "2026.09.20-term8";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -1976,7 +1976,10 @@ function isTakipView(){
   let h = '<div class="itwrap">';
   if (S.a42.hata)
     h += `<div class="itnot">${esc(S.a42.hata)} <button class="itlink" data-act="a42-yenile">yeniden dene</button></div>`;
-  if (!acik.length && !tek.length && !S.a42.hata)
+  if (!acik.length && !tek.length && !S.a42.hata && a42Bekliyor)
+    h += `<div class="mbos"><h3>Yükleniyor…</h3>
+      <p>TERM İş Takip tablosu okunuyor. Liste büyük olduğu için bu 15–25 saniye sürebilir.</p></div>`;
+  else if (!acik.length && !tek.length && !S.a42.hata)
     h += `<div class="mbos"><h3>İş listesi boş</h3>
       <p>Devam eden iş ya da bekleyen teklif görünmüyor. Bağlantı ayarı Hesap ekranındaki
       <b>TERM bağlantısı</b> altında.</p>
@@ -2103,12 +2106,19 @@ function ekranAc(tab){
 }
 function anaEkrana(gecmisten){
   if (S.tab === 'home') return;
+  if (!gecmisten && _gecmisDerinlik > 0){
+    /* S.tab'ı burada DEĞİŞTİRME: popstate dinleyicisi "zaten home" sanıp
+       render()'ı atlıyordu — ekran kartta kalıyordu. */
+    _gecmisDerinlik--;
+    try {
+      history.back();
+      /* emniyet: popstate bir sebeple gelmezse ekranı yine de ana ekrana al */
+      setTimeout(function(){ if (S.tab !== 'home'){ S.tab = 'home'; S.composer = null; render(); } }, 300);
+      return;
+    } catch(e){ _gecmisDerinlik++; }
+  }
   S.tab = 'home';
   S.composer = null;
-  if (!gecmisten && _gecmisDerinlik > 0){
-    _gecmisDerinlik--;
-    try { history.back(); return; } catch(e){}   /* popstate render'ı tetikler */
-  }
   render();
 }
 window.addEventListener('popstate', () => {
