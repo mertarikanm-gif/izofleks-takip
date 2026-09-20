@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term5";
+const APP_VERSION = "2026.09.20-term6";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -700,6 +700,7 @@ async function loadA42(yumusak){
   }
   a42Bekliyor = false;
   renderPicker();
+  if (S.tab === 'istakip') render();   /* veri geldiğinde İş Takip ekranı kendi kendine dolsun */
 }
 
 
