@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term2";
+const APP_VERSION = "2026.09.20-term3";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -609,7 +609,7 @@ const dataPanelHtml = () => `<details class="data"><summary>Veri · dışa/içe 
     <button class="btn" data-act="purge-done">Biten görevleri temizle</button>
   </div></div></details>`;
 
-/* ============ A42 bağlantısı ============ */
+/* ============ TERM İş Takip bağlantısı ============ */
 /* Adres kodda durmaz — hesabın altına kaydedilir (depo herkese açık). */
 const getSetting = k => (S.settings.find(x => x.k === k) || {}).v || '';
 function setSetting(k, v){
@@ -665,14 +665,14 @@ async function loadA42(yumusak){
   if (yumusak && S.a42.at && Date.now() - S.a42.at < 600000) return;
   a42Bekliyor = true;
   try {
-    const res = await jsonp(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list', 20000);
+    const res = await jsonp(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list', 45000);
     if (res && res.ok){
       S.a42 = { isler: res.isler || [], teklifler: res.teklifler || [], at: Date.now(), hata: '' };
     } else {
-      S.a42 = { ...S.a42, hata: 'A42 yanıtı okunamadı' };
+      S.a42 = { ...S.a42, hata: 'TERM İş Takip yanıtı okunamadı' };
     }
   } catch(e){
-    S.a42 = { ...S.a42, hata: 'A42 bağlantısı kurulamadı (' + e.message + ')' };
+    S.a42 = { ...S.a42, hata: 'TERM İş Takip bağlantısı kurulamadı (' + e.message + ')' };
   }
   a42Bekliyor = false;
   renderPicker();
@@ -2388,7 +2388,7 @@ document.addEventListener('click', async (e) => {
     S.a42 = { isler: [], teklifler: [], at: 0, hata: '' };
     await loadA42(false);
     openSheet();
-    note(v ? (a42Devam().length + ' devam eden iş okundu.') : 'A42 bağlantısı kaldırıldı.');
+    note(v ? (a42Devam().length + ' devam eden iş okundu.') : 'TERM bağlantısı kaldırıldı.');
     return;
   }
   if (a === 'mic'){ sesBaslat(); return; }
