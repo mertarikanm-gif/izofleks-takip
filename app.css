@@ -717,3 +717,43 @@ html,body{overscroll-behavior-x:contain;}
 .itnot{background:var(--warn-soft);border:1px solid #EFCEC6;border-radius:9px;padding:9px 12px;
   font-size:12.5px;color:var(--warn);margin-bottom:12px;}
 .itlink{color:var(--accent-ink);font-weight:600;text-decoration:underline;font-size:12.5px;}
+
+/* ---- İş Takip: satır işlemleri ---- */
+.itwrap .mrow{cursor:pointer;}
+.itwrap .mrow.sec{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft),var(--shadow);}
+.itact{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin-top:9px;padding-top:9px;border-top:1px dashed var(--line);}
+.itbtn{border:none;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:700;
+  color:#fff;cursor:pointer;font-family:inherit;min-height:38px;}
+.itbtn:disabled{opacity:.45;cursor:default;}
+.itbtn.ok{background:#276749;} .itbtn.rd{background:#C53030;}
+.itbtn.bl{background:#3A7EBF;}
+.itbtn.gr{background:var(--panel-2);color:var(--ink-2);border:1px solid var(--line);}
+.itbek{font-size:11.5px;color:var(--ink-3);}
+
+/* ---- İş Takip: Red / Kabul penceresi ---- */
+.itov{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;
+  display:flex;align-items:flex-end;justify-content:center;padding:0;}
+@media (min-width:560px){ .itov{align-items:center;padding:16px;} }
+.itovk{background:var(--panel);width:100%;max-width:440px;border-radius:16px 16px 0 0;
+  overflow:hidden;box-shadow:0 -10px 40px rgba(0,0,0,.3);max-height:92vh;
+  display:flex;flex-direction:column;cursor:default;}
+@media (min-width:560px){ .itovk{border-radius:16px;} }
+.itovb{color:#fff;padding:13px 16px;font-size:13px;font-weight:800;}
+.itovb.rd{background:#C53030;} .itovb.ok{background:#276749;}
+.itovg{padding:14px 16px 18px;overflow:auto;}
+.itovm{font-size:13px;font-weight:600;line-height:1.4;margin-bottom:13px;}
+.itovm span{font-family:var(--f-mono);font-size:11.5px;font-weight:400;color:var(--ink-3);}
+.itovl{display:flex;flex-direction:column;gap:7px;}
+.itovs{width:100%;text-align:left;padding:12px 13px;border:1.5px solid var(--line);
+  background:var(--panel);color:var(--ink);border-radius:9px;font-size:13px;font-weight:600;
+  cursor:pointer;font-family:inherit;}
+.itovs.on{border-color:#C53030;color:#C53030;background:var(--warn-soft);}
+.itovp{margin-bottom:12px;}
+.itovn{display:block;font-size:11px;color:var(--ink-3);font-weight:600;margin-top:14px;line-height:1.4;}
+.itovn input{width:100%;box-sizing:border-box;margin-top:6px;padding:11px 12px;
+  border:1px solid var(--line);border-radius:9px;font-size:15px;font-family:inherit;
+  background:var(--panel);color:var(--ink);}
+.itovk2{font-size:12.5px;color:var(--ink-2);margin-top:8px;min-height:18px;}
+.itovf{display:flex;gap:9px;margin-top:18px;}
+.itovf .itbtn{flex:1;}

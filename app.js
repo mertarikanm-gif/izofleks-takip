@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term9";
+const APP_VERSION = "2026.09.20-term10";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -88,7 +88,10 @@ const S = {
   jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [],
   muh: { yon:'', ara:'', odeme:'', limit:60 },
   stk: { firma:'', ara:'', limit:60 },
-  a42: { isler: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
+  a42: { isler: [], teklifler: [], faturalar: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
+  itSec: '',           // İş Takip'te açık satır: 'is:<is_id>' | 'tk:<id>'
+  itOv: null,          // İş Takip işlem penceresi: { tip:'red'|'kabul', id, ... }
+  itMesgul: '',        // sheet'e yazarken kilitli satır
   ref: { c: [], p: [] },   // teklif arşivinden gelen müşteri/proje rehberi (rehber.json)
   showDone: false,
   showArchived: false,
@@ -675,6 +678,52 @@ async function sheetCek(url, ms){
   } finally { clearTimeout(zaman); }
 }
 
+/* Sheet'e YAZ — okuma ile aynı çerezsiz yol (fn=is / fn=teklif).
+   Boş metin ('') bilerek gönderilir: sheet'teki alanı temizlemek için gerekiyor. */
+async function a42Yaz(params, ms){
+  const url = getSetting('a42url');
+  if (!url) throw new Error('TERM bağlantısı ayarlı değil');
+  const q = ['cb=t', 'r=' + Math.random()];
+  for (const k in params){
+    if (params[k] === null || params[k] === undefined) continue;
+    q.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
+  }
+  const hedef = url + (url.indexOf('?') >= 0 ? '&' : '?') + q.join('&');
+  const kesici = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const zaman = setTimeout(() => { try { kesici && kesici.abort(); } catch(e){} }, ms || 30000);
+  try {
+    const r = await fetch(hedef, { credentials: 'omit', signal: kesici ? kesici.signal : undefined });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const t = (await r.text()).trim();
+    const a = t.indexOf('('), b = t.lastIndexOf(')');
+    const res = (a >= 0 && b > a) ? JSON.parse(t.slice(a + 1, b)) : null;
+    if (res && res.ok === false) throw new Error(res.hata || res.error || 'sheet reddetti');
+    return res || {};
+  } finally { clearTimeout(zaman); }
+}
+
+/* İşlem sonrası: listeyi tazele, satırı kapat */
+async function itSonra(mesaj){
+  S.itSec = ''; S.itOv = null; S.itMesgul = '';
+  S.a42.at = 0;
+  render();
+  note(mesaj);
+  await loadA42(false);
+  render();
+}
+
+function itTl(n){ return (+n || 0).toLocaleString('tr-TR', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function itBugun(){
+  const d = new Date();
+  return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear();
+}
+/* masaüstü TERM ile birebir aynı formül (_karHesapla) */
+function itKar(T, M){
+  if (!(T > 0) || !(M > 0)) return null;
+  const bk = T - M, vergi = bk * 0.22 + bk * (1 - 0.22) * 0.2, net = bk - vergi;
+  return { brutKar: bk, netKar: net, brutKarPct: (T / M - 1) * 100, netKarPct: (net / T) * 100 };
+}
+
 let a42Bekliyor = false;
 async function loadA42(yumusak){
   const url = getSetting('a42url');
@@ -691,7 +740,8 @@ async function loadA42(yumusak){
       res = await jsonp(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list', 45000);
     }
     if (res && res.ok){
-      S.a42 = { isler: res.isler || [], teklifler: res.teklifler || [], at: Date.now(), hata: '' };
+      S.a42 = { isler: res.isler || [], teklifler: res.teklifler || [],
+                faturalar: res.faturalar || [], at: Date.now(), hata: '' };
     } else {
       S.a42 = { ...S.a42, hata: 'TERM İş Takip yanıtı okunamadı' };
     }
@@ -2002,7 +2052,8 @@ function isTakipView(){
                 : x.sozlesme_usd ? paraYaz(x.sozlesme_usd, 'USD') : '';
       const gorev = S.tasks.filter(t => t.jobId && !t.done &&
         (jobById(t.jobId) || {}).a42Id === x.is_id).length;
-      h += `<div class="mrow gd">
+      const k = 'is:' + x.is_id, acikMi = S.itSec === k, mesgul = S.itMesgul === k;
+      h += `<div class="mrow gd ${acikMi ? 'sec' : ''}" data-act="it-sec" data-k="${esc(k)}">
         <div class="mr-1"><span class="myon g">DEVAM</span>
           <span class="mtar">${esc(trTarih(x.baslangic))}</span>
           ${gorev ? `<span class="mrz on">${gorev} görev</span>` : ''}</div>
@@ -2010,6 +2061,11 @@ function isTakipView(){
         <div class="mr-3"><span class="mno">${esc(x.proje || '')}</span>
           <span class="mtut">${tut}</span></div>
         ${x.teslim ? `<div class="mr-4">Teslim: ${esc(trTarih(x.teslim))}</div>` : ''}
+        ${acikMi ? `<div class="itact">
+          <button class="itbtn ok" data-act="it-bitir" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Bitir</button>
+          <button class="itbtn rd" data-act="it-sil" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Sil</button>
+          ${mesgul ? '<span class="itbek">kaydediliyor…</span>' : ''}
+        </div>` : ''}
       </div>`;
     });
     h += '</div>';
@@ -2017,21 +2073,219 @@ function isTakipView(){
   if (tek.length){
     h += '<h3 class="itbas">Bekleyen teklifler</h3><div class="mlist">';
     tek.forEach(t => {
-      h += `<div class="mrow gl">
-        <div class="mr-1"><span class="myon l">${esc(String(t.durum || 'TEKLİF'))}</span>
+      const dur = String(t.durum || '');
+      const k = 'tk:' + t.id, acikMi = S.itSec === k, mesgul = S.itMesgul === k;
+      h += `<div class="mrow gl ${acikMi ? 'sec' : ''}" data-act="it-sec" data-k="${esc(k)}">
+        <div class="mr-1"><span class="myon l">${esc(dur || 'TEKLİF')}</span>
           <span class="mtar">${esc(trTarih(t.tarih || t.guncelleme))}</span></div>
         <div class="mr-2">${esc(t.musteri || '')}</div>
         <div class="mr-3"><span class="mno">${esc(t.proje || '')}</span>
           <span class="mtut">${paraYaz(t.tutar_usd, 'USD')}</span></div>
+        ${acikMi ? `<div class="itact">
+          ${dur === 'HAZIR' ? `<button class="itbtn bl" data-act="it-gonder" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Gönderildi</button>` : ''}
+          ${(dur !== 'KABUL' && dur !== 'RED') ? `
+            <button class="itbtn ok" data-act="it-kabul" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Kabul</button>
+            <button class="itbtn rd" data-act="it-red" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Red</button>` : ''}
+          ${mesgul ? '<span class="itbek">kaydediliyor…</span>' : ''}
+        </div>` : ''}
       </div>`;
     });
     h += '</div>';
   }
   if (acik.length || tek.length)
-    h += '<p class="mnot">TERM İş Takip tablosundan okunur · '
+    h += '<p class="mnot">Satıra dokun → işlemler açılır · '
        + `<button class="itlink" data-act="a42-yenile">yenile</button></p>`;
+  h += itOverlay();
   h += '</div>';
   return h;
+}
+
+/* ---- İş Takip işlem pencereleri (Red sebebi / Kabul tutarı) ---- */
+const IT_RED_SEBEP = [
+  ['FIYAT',    'Fiyat yüksek'],
+  ['RAKIP',    'Rakibe gitti'],
+  ['SURE',     'Termin / süre uymadı'],
+  ['KAPSAM',   'Kapsam değişti'],
+  ['IPTAL',    'Proje iptal / ertelendi'],
+  ['CEVAPSIZ', 'Cevap alınamadı'],
+  ['DIGER',    'Diğer']
+];
+function itOverlay(){
+  const o = S.itOv;
+  if (!o) return '';
+  const t = (S.a42.teklifler || []).find(x => String(x.id) === String(o.id)) || {};
+  const bas = esc((t.musteri || '') + (t.proje ? ' — ' + t.proje : ''));
+  if (o.tip === 'red'){
+    return `<div class="itov" data-act="it-ov-kapat"><div class="itovk" data-act="it-ov-ic">
+      <div class="itovb rd">Teklif reddedildi — sebep?</div>
+      <div class="itovg">
+        <p class="itovm">${bas}<br><span>${paraYaz(t.tutar_usd, 'USD')}</span></p>
+        <div class="itovl">
+          ${IT_RED_SEBEP.map(s => `<button class="itovs${o.sebep === s[0] ? ' on' : ''}" data-act="it-red-sec" data-v="${s[0]}">${s[1]}</button>`).join('')}
+        </div>
+        <label class="itovn">Not (opsiyonel)
+          <input id="it-red-not" type="text" placeholder="ör. rakip %15 altında verdi" value="${esc(o.not || '')}"></label>
+        <div class="itovf">
+          <button class="itbtn gr" data-act="it-ov-kapat">Vazgeç</button>
+          <button class="itbtn rd" data-act="it-red-kaydet" ${o.sebep ? '' : 'disabled'}>Reddet</button>
+        </div>
+      </div></div></div>`;
+  }
+  if (o.tip === 'kabul'){
+    const sym = o.para === 'TL' ? '₺' : '$';
+    const v = parseFloat(String(o.tutar || '').replace(/[^0-9.,]/g, '').replace(/\./g, '').replace(',', '.'));
+    const kdvli = v > 0 ? v * 1.20 : 0;
+    return `<div class="itov" data-act="it-ov-kapat"><div class="itovk" data-act="it-ov-ic">
+      <div class="itovb ok">Teklif kabul edildi — iş açılıyor</div>
+      <div class="itovg">
+        <p class="itovm">${bas}<br><span>teklif ${paraYaz(t.tutar_usd, 'USD')}</span></p>
+        <div class="mseg itovp">
+          <button class="msg${o.para === 'TL' ? ' on' : ''}" data-act="it-kabul-para" data-v="TL">₺ sabit</button>
+          <button class="msg${o.para === 'USD' ? ' on' : ''}" data-act="it-kabul-para" data-v="USD">$ kur bazlı</button>
+        </div>
+        <label class="itovn">Kabul edilen meblağ (${sym}, KDV hariç) — boş bırakırsan teklif tutarı kullanılır
+          <input id="it-kabul-tutar" type="text" inputmode="decimal" placeholder="0,00" value="${esc(o.tutar || '')}"></label>
+        <p class="itovk2">${v > 0 ? `+ %20 KDV = <b>${itTl(kdvli)} ${sym}</b> (KDV dâhil)` : ''}</p>
+        <div class="itovf">
+          <button class="itbtn gr" data-act="it-ov-kapat">Vazgeç</button>
+          <button class="itbtn ok" data-act="it-kabul-kaydet">İşi aç</button>
+        </div>
+      </div></div></div>`;
+  }
+  return '';
+}
+
+function itSayi(s){
+  const v = parseFloat(String(s == null ? '' : s).replace(/[^0-9.,]/g, '').replace(/\./g, '').replace(',', '.'));
+  return isFinite(v) ? v : 0;
+}
+/* pencere yeniden çizilmeden önce yazılanları state'e al */
+function itNotAl(){
+  if (!S.itOv) return;
+  const n = document.getElementById('it-red-not');    if (n) S.itOv.not = n.value;
+  const t = document.getElementById('it-kabul-tutar'); if (t) S.itOv.tutar = t.value;
+}
+/* yazarken KDV satırını tazele — tam render yapmadan (odak kaybolmasın) */
+document.addEventListener('input', (e) => {
+  if (!S.itOv) return;
+  if (e.target.id === 'it-red-not'){ S.itOv.not = e.target.value; return; }
+  if (e.target.id === 'it-kabul-tutar'){
+    S.itOv.tutar = e.target.value;
+    const p = document.querySelector('.itovk2');
+    if (!p) return;
+    const v = itSayi(e.target.value), sym = S.itOv.para === 'TL' ? '₺' : '$';
+    p.innerHTML = v > 0 ? `+ %20 KDV = <b>${itTl(v * 1.20)} ${sym}</b> (KDV dâhil)` : '';
+  }
+});
+
+async function itKilit(k, isle){
+  S.itMesgul = k; render();
+  try { await isle(); }
+  catch(err){
+    S.itMesgul = ''; render();
+    note('Kaydedilemedi: ' + (err && err.message ? err.message : 'bağlantı hatası'));
+  }
+}
+
+/* İŞİ BİTİR — masaüstündeki gibi gelen faturalardan gerçekleşen maliyet/kâr */
+async function itBitir(isId){
+  const x = (S.a42.isler || []).find(z => String(z.is_id) === String(isId));
+  if (!x){ note('İş bulunamadı.'); return; }
+  const fs = (S.a42.faturalar || []).filter(f => String(f.is_id || '') === String(isId));
+  const gerTL = fs.reduce((s, f) => s + (+f.tutar_kdvharic || 0), 0);
+  const kur = +x.kur || 0, sozUSD = +x.sozlesme_usd || 0;
+  const kar = (sozUSD > 0 && kur > 0 && gerTL > 0) ? itKar(sozUSD * kur, gerTL) : null;
+  const p = { fn:'is', is_id:isId, durum:'BITTI', bitis:itBugun() };
+  const ad = (x.musteri || '') + (x.proje ? ' — ' + x.proje : '');
+  if (kar){
+    const mUSD = +(gerTL / kur).toFixed(2), nkUSD = +(kar.netKar / kur).toFixed(2);
+    if (!confirm(`“${ad}” işi GERÇEKLEŞEN değerlerle bitirilsin mi?\n(gelen ${fs.length} faturaya göre)\n\n`
+      + `Gerçekleşen maliyet: ${itTl(gerTL)} ₺  (${itTl(mUSD)} $)\n`
+      + `Brüt kâr: ${itTl(kar.brutKar)} ₺  (%${kar.brutKarPct.toFixed(1)})\n`
+      + `Net kâr:  ${itTl(kar.netKar)} ₺  (%${kar.netKarPct.toFixed(1)})\n\n`
+      + 'Not: maliyet artık BÜTÇE değil GERÇEKLEŞEN olur.')) return;
+    p.gerceklesen_tl = gerTL;
+    p.plan_maliyet_usd = mUSD;
+    p.net_kar_usd = nkUSD;
+    p.kar_yuzde = +kar.brutKarPct.toFixed(1);
+    p['not'] = `Gerçekleşen | Kâr %${kar.brutKarPct.toFixed(1)} | Maliyet ${itTl(gerTL)} ₺ | Net kâr ${itTl(kar.netKar)} ₺ (%${kar.netKarPct.toFixed(1)})`;
+  } else {
+    const neden = gerTL <= 0 ? 'Bu işe ait fatura yok (gerçekleşen = 0).'
+                             : 'Kur ya da sözleşme tutarı yok — gerçekleşen kâr hesaplanamıyor.';
+    if (!confirm(`“${ad}”\n\n${neden}\nYine de bitirilsin mi? (Gerçekleşen değerler kaydedilmez.)`)) return;
+  }
+  await itKilit('is:' + isId, async () => {
+    await a42Yaz(p);
+    await itSonra('İş bitirildi');
+  });
+}
+
+async function itSil(isId){
+  const x = (S.a42.isler || []).find(z => String(z.is_id) === String(isId)) || {};
+  const ad = (x.musteri || '') + (x.proje ? ' — ' + x.proje : '') || isId;
+  if (!confirm(`“${ad}” işini silmek istediğine emin misin?\n(Listeden kaldırılır — durum: SİLİNDİ)`)) return;
+  await itKilit('is:' + isId, async () => {
+    await a42Yaz({ fn:'is', is_id:isId, durum:'SILINDI', bitis:'' });
+    await itSonra('İş silindi');
+  });
+}
+
+async function itTeklifDurum(id, durum, mesaj){
+  await itKilit('tk:' + id, async () => {
+    await a42Yaz({ fn:'teklif', id, durum });
+    await itSonra(mesaj);
+  });
+}
+
+async function itRedKaydet(){
+  itNotAl();
+  const o = S.itOv; if (!o || !o.sebep) return;
+  const id = o.id, not = o.not || '';
+  S.itOv = null;
+  await itKilit('tk:' + id, async () => {
+    await a42Yaz({ fn:'teklif', id, durum:'RED', red_sebep:o.sebep, red_not:not });
+    await itSonra('Teklif reddedildi olarak kaydedildi');
+  });
+}
+
+/* TEKLİFİ KABUL ET — iş kaydı açar, sonra teklifi KABUL'e çeker (masaüstüyle aynı sıra) */
+async function itKabulKaydet(){
+  itNotAl();
+  const o = S.itOv; if (!o) return;
+  const t = (S.a42.teklifler || []).find(x => String(x.id) === String(o.id));
+  if (!t){ note('Teklif bulunamadı.'); return; }
+  const para = o.para === 'USD' ? 'USD' : 'TL';
+  const v = itSayi(o.tutar);
+  const kabulTutar = v > 0 ? +v.toFixed(2) : null;
+  const kabulKdvli = v > 0 ? +(v * 1.20).toFixed(2) : null;
+  const sym = para === 'TL' ? '₺' : '$';
+  const ad = (t.musteri || '') + (t.proje ? ' — ' + t.proje : '');
+  const ozet = kabulTutar
+    ? `Kabul edilen meblağ: ${itTl(kabulTutar)} ${sym} + %20 KDV = ${itTl(kabulKdvli)} ${sym}`
+    : 'Kabul tutarı girilmedi — sözleşme teklif tutarı olarak açılacak.';
+  if (!confirm(`“${ad}” teklifi KABUL edilip iş açılacak.\n\n${ozet}\n\nOnaylıyor musun?`)) return;
+
+  const d = new Date();
+  const isId = 'IS' + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2)
+             + '-' + Math.floor(Math.random() * 900 + 100);
+  const sheetAdi = ((t.musteri || '').split(' ')[0].slice(0, 4) + '-' + (t.proje || '').slice(0, 12)).toUpperCase();
+  let sozUsd = t.tutar_usd, sozTl = null, sozPara = 'USD';
+  if (kabulTutar > 0){
+    if (para === 'TL'){ sozTl = kabulTutar; sozPara = 'TL'; }
+    else { sozUsd = kabulTutar; sozPara = 'USD'; }
+  }
+  const id = o.id;
+  S.itOv = null;
+  await itKilit('tk:' + id, async () => {
+    await a42Yaz({ fn:'is', is_id:isId, teklif_id:id, baslangic:itBugun(),
+      musteri:t.musteri, proje:t.proje, sheet_adi:sheetAdi,
+      sozlesme_usd:sozUsd, sozlesme_tl:sozTl, sozlesme_para:sozPara,
+      plan_maliyet_usd:t.maliyet_usd, mk_butce:t.mk_butce || '', durum:'DEVAM',
+      kabul_tutar:kabulTutar, kabul_tutar_kdvli:kabulKdvli, kabul_para:kabulTutar ? para : null });
+    await a42Yaz({ fn:'teklif', id, durum:'KABUL', is_id:isId,
+      kabul_tutar:kabulTutar, kabul_tutar_kdvli:kabulKdvli, kabul_para:kabulTutar ? para : null });
+    await itSonra('İş açıldı: ' + isId);
+  });
 }
 
 /* ============ Stok (telefon) ============ */
@@ -2358,6 +2612,24 @@ document.addEventListener('click', async (e) => {
   if (a === 'stk-f'){ S.stk[b.dataset.k] = b.dataset.v; S.stk.limit = 60; render(); return; }
   if (a === 'stk-more'){ S.stk.limit += 120; render(); return; }
   if (a === 'a42-yenile'){ S.a42.at = 0; loadA42(false).then(render); return; }
+
+  /* ---- İş Takip işlemleri ---- */
+  if (a === 'it-sec'){
+    if (e.target.closest('.itact')) return;      // buton tıklaması satırı kapatmasın
+    S.itSec = (S.itSec === b.dataset.k) ? '' : b.dataset.k;
+    render(); return;
+  }
+  if (a === 'it-ov-ic') return;                  // pencere içine tıklama kapatmasın
+  if (a === 'it-ov-kapat'){ itNotAl(); S.itOv = null; render(); return; }
+  if (a === 'it-bitir'){ await itBitir(id); return; }
+  if (a === 'it-sil'){ await itSil(id); return; }
+  if (a === 'it-gonder'){ await itTeklifDurum(id, 'GONDERILDI', 'Teklif gönderildi olarak işaretlendi'); return; }
+  if (a === 'it-red'){ S.itOv = { tip:'red', id, sebep:'', not:'' }; render(); return; }
+  if (a === 'it-red-sec'){ itNotAl(); S.itOv.sebep = b.dataset.v; render(); return; }
+  if (a === 'it-red-kaydet'){ await itRedKaydet(); return; }
+  if (a === 'it-kabul'){ S.itOv = { tip:'kabul', id, para:'TL', tutar:'' }; render(); return; }
+  if (a === 'it-kabul-para'){ itNotAl(); S.itOv.para = b.dataset.v; render(); return; }
+  if (a === 'it-kabul-kaydet'){ await itKabulKaydet(); return; }
   if (a === 'week'){ S.weekStart = addDays(S.weekStart, 7 * parseInt(b.dataset.v, 10)); S.composer = null; render(); return; }
   if (a === 'month'){
     const d = new Date(S.weekStart.getFullYear(), S.weekStart.getMonth() + parseInt(b.dataset.v, 10), 1);
