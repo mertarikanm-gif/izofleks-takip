@@ -620,11 +620,14 @@ html,body{overscroll-behavior-x:contain;}
 .backbtn:active{transform:scale(.96);}
 @media (max-width:420px){.backbtn .bt{display:none;}.backbtn{padding:0 9px;}}
 /* logo = ana ekran */
-.topbar .brand{cursor:default;transform-origin:left center;transition:transform .15s ease,opacity .15s ease;}
+/* Logoya gelince SADECE logo büyür — TERM yazısı yerinde kalır.
+   Boşluk, büyüyen logonun yazıya değmeyeceği kadar geniş tutuldu (logo 80px, %8 = ~6.4px). */
+.topbar .brand{cursor:default;gap:18px;}
+.topbar .brand img{transform-origin:left center;transition:transform .15s ease;}
 .topbar .brand.tiklanir{cursor:pointer;}
-.topbar .brand.tiklanir:hover{opacity:1;transform:scale(1.08);}
-.topbar .brand.tiklanir:active{transform:scale(1.02);}
-@media (hover:none){ .topbar .brand.tiklanir:hover{transform:none;} }
+.topbar .brand.tiklanir:hover img{transform:scale(1.08);}
+.topbar .brand.tiklanir:active img{transform:scale(1.02);}
+@media (hover:none){ .topbar .brand.tiklanir:hover img{transform:none;} }
 .ekranad{font-family:var(--f-disp);font-weight:600;font-size:14.5px;color:var(--bar-ink);
   white-space:nowrap;margin-left:2px;}
 @media (max-width:560px){.ekranad{display:none;}}
