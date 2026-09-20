@@ -1,8 +1,8 @@
-/* İzofleks İş Takibi — service worker
+/* TERM (telefon) — service worker
    Uygulama kabuğunu önbelleğe alır: internet yokken de açılır.
    Veri senkronu Firestore'un kendi çevrimdışı önbelleğiyle çalışır. */
 
-const CACHE = 'izo-takip-v48';
+const CACHE = 'izo-takip-v49';
 const SHELL = [
   './',
   './index.html',

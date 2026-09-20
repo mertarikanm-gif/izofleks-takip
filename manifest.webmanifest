@@ -1,7 +1,7 @@
 {
-  "name": "İzofleks İş Takibi",
-  "short_name": "İş Takibi",
-  "description": "Devam eden işler ve haftalık görev takibi — İzofleks.",
+  "name": "TERM — Tars Enterprise Resource Management",
+  "short_name": "TERM",
+  "description": "TERM — görev takibi, muhasebe ve iş yönetimi. İzofleks / TARS Mühendislik.",
   "lang": "tr",
   "dir": "ltr",
   "start_url": "./",
@@ -19,7 +19,7 @@
     { "src": "./icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Bu hafta", "short_name": "Hafta", "url": "./?v=week", "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }] },
-    { "name": "İşler", "short_name": "İşler", "url": "./?v=jobs", "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }] }
+    { "name": "Görevler", "short_name": "Görev", "url": "./?v=week", "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }] },
+    { "name": "Muhasebe", "short_name": "Muhasebe", "url": "./?v=muhasebe", "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }] }
   ]
 }

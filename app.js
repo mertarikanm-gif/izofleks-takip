@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20j";
+const APP_VERSION = "2026.09.20-term1";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -39,7 +39,7 @@ function rangeLabel(a, b){
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ============ depo: yerel ============ */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings'];
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe'];
 
 function localStore(){
   let data = {};
@@ -81,10 +81,12 @@ function firestoreStore(fs, uid){
 
 /* ============ durum ============ */
 const S = {
-  tab: 'week',
+  tab: 'home',
+  gorevTab: 'week',
   weekStart: mondayOf(new Date()),
   view: (() => { try { return localStorage.getItem('izo-view') === 'month' ? 'month' : 'week'; } catch(e){ return 'week'; } })(),
-  jobs: [], tasks: [], contacts: [], settings: [],
+  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [],
+  muh: { yon:'', ara:'', odeme:'', limit:60 },
   a42: { isler: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
   ref: { c: [], p: [] },   // teklif arşivinden gelen müşteri/proje rehberi (rehber.json)
   showDone: false,
@@ -1793,16 +1795,179 @@ function sgPick(k){
   (input.id === 'j-cust' ? document.getElementById('j-proj') : input)?.focus();
 }
 
+/* ============ TERM ana ekran (kart ızgarası) ============ */
+const TERM_KARTLAR = [
+  { id:'gorev', ad:'Görev Takibi', ac:'Haftalık görevler · sesli komut', hazir:true,
+    ikon:'<rect x="6" y="6" width="48" height="42" rx="6" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="2"/><rect x="6" y="6" width="48" height="10" rx="6" fill="#3A7EBF"/><rect x="6" y="11" width="48" height="5" fill="#3A7EBF"/><line x1="17" y1="3" x2="17" y2="10" stroke="#1F3864" stroke-width="2.6" stroke-linecap="round"/><line x1="43" y1="3" x2="43" y2="10" stroke="#1F3864" stroke-width="2.6" stroke-linecap="round"/><path d="M14 27.5 L17.5 31 L23.5 24" fill="none" stroke="#276749" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><line x1="28" y1="28" x2="47" y2="28" stroke="#1F3864" stroke-width="1.9" stroke-linecap="round"/>' },
+  { id:'muh', ad:'Muhasebe', ac:'Gelen · giden faturalar, ödeme durumu', hazir:true,
+    ikon:'<rect x="6" y="4" width="37" height="46" rx="4" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="2"/><line x1="12" y1="13" x2="37" y2="13" stroke="#3A7EBF" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="20" x2="31" y2="20" stroke="#3A7EBF" stroke-width="1.4" stroke-linecap="round" opacity=".55"/><line x1="12" y1="26" x2="34" y2="26" stroke="#3A7EBF" stroke-width="1.4" stroke-linecap="round" opacity=".55"/><line x1="12" y1="40" x2="37" y2="40" stroke="#1F3864" stroke-width="1.8" stroke-linecap="round"/><circle cx="46" cy="37" r="12.5" fill="#276749"/><path d="M42 37 L45 40 L51 33" fill="none" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' },
+  { id:'istakip', ad:'İş Takip', ac:'Teklif → Kabul → İş → Fatura', hazir:false,
+    ikon:'<rect x="3" y="12" width="15" height="30" rx="3" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="1.8"/><rect x="22" y="12" width="15" height="30" rx="3" fill="#F0FFF4" stroke="#276749" stroke-width="1.8"/><path d="M25.5 27.5 L28.5 30.5 L34 24" fill="none" stroke="#276749" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="41" y="12" width="15" height="30" rx="3" fill="#FAF5FF" stroke="#805AD5" stroke-width="1.8"/>' },
+  { id:'stok', ad:'Stok', ac:'Depo giriş · çıkış ve bakiye', hazir:false,
+    ikon:'<rect x="6" y="20" width="48" height="30" rx="3" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="2"/><path d="M6 20 L14 8 L46 8 L54 20 Z" fill="#3A7EBF" opacity=".85"/><rect x="24" y="20" width="12" height="9" rx="1.5" fill="#1F3864"/>' },
+  { id:'musteri', ad:'Müşteri', ac:'Kişi · firma · mail rehberi', hazir:false,
+    ikon:'<rect x="4" y="6" width="52" height="42" rx="5" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="2"/><rect x="4" y="6" width="52" height="8" rx="5" fill="#3A7EBF"/><circle cx="18" cy="26" r="5" fill="#3A7EBF" opacity=".85"/><path d="M10 40 Q10 32 18 32 Q26 32 26 40 Z" fill="#3A7EBF" opacity=".55"/><line x1="32" y1="23" x2="50" y2="23" stroke="#1F3864" stroke-width="2" stroke-linecap="round"/>' },
+  { id:'poz', ad:'Poz Oluştur', ac:'Bölme · kapı kasası · süpürgelik', hazir:false,
+    ikon:'<rect x="4" y="6" width="52" height="42" rx="5" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="2"/><rect x="4" y="6" width="52" height="8" rx="5" fill="#3A7EBF"/><rect x="11" y="22" width="8" height="8" rx="2" fill="#3A7EBF" opacity=".75"/><line x1="24" y1="24" x2="48" y2="24" stroke="#1F3864" stroke-width="1.8" stroke-linecap="round"/>' },
+  { id:'proje', ad:'Proje Oluştur', ac:'Yeni müşteri projesi', hazir:false,
+    ikon:'<path d="M6 18 Q6 12 12 12 L26 12 L30 18 L54 18 Q58 18 58 22 L58 48 Q58 52 54 52 L6 52 Q2 52 2 48 L2 22 Q2 18 6 18 Z" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="2"/><line x1="12" y1="29" x2="48" y2="29" stroke="#3A7EBF" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="37" x2="48" y2="37" stroke="#3A7EBF" stroke-width="1.8" stroke-linecap="round"/>' },
+  { id:'birim', ad:'Birim Maliyet', ac:'Profil ve cam birim fiyatları', hazir:false,
+    ikon:'<rect x="4" y="4" width="52" height="46" rx="7" fill="#EBF4FF" stroke="#3A7EBF" stroke-width="2"/><circle cx="16" cy="22" r="10" fill="#3A7EBF"/><circle cx="30" cy="22" r="10" fill="#2C7A7B"/><circle cx="44" cy="22" r="10" fill="#276749"/>' }
+];
+
+function homeView(){
+  const gorevN = S.tasks.filter(t => !t.done).length;
+  const muhN = muhListe().length;
+  let h = '<div class="hmwrap"><h2 class="hm-h">Ne yapmak istiyorsun?</h2><div class="hmgrid">';
+  TERM_KARTLAR.forEach(k => {
+    const rozet = k.id === 'gorev' && gorevN ? `<span class="hm-b">${gorevN}</span>`
+                : k.id === 'muh' && muhN ? `<span class="hm-b">${muhN}</span>` : '';
+    h += `<button class="hmcard${k.hazir ? '' : ' dis'}" data-act="kart" data-v="${k.id}">
+      ${rozet}<svg class="hm-ic" viewBox="0 0 60 54" aria-hidden="true">${k.ikon}</svg>
+      <span class="hm-t">${esc(k.ad)}</span><span class="hm-d">${esc(k.ac)}</span>
+      ${k.hazir ? '' : '<span class="hm-pc">bilgisayarda</span>'}</button>`;
+  });
+  h += '</div></div>';
+  return h;
+}
+
+/* ============ Muhasebe (telefon) ============ */
+function muhMeta(){ return S.muhasebe.find(d => d.id === 'meta') || null; }
+function muhListe(){
+  const p = S.muhasebe.filter(d => d.id !== 'meta' && Array.isArray(d.l))
+    .sort((a, b) => (a.i || 0) - (b.i || 0));
+  let out = [];
+  p.forEach(d => { out = out.concat(d.l); });
+  return out;
+}
+function muhTL(n){
+  if (n == null || isNaN(n)) return '';
+  const s = Math.abs(Number(n)).toFixed(2).split('.');
+  return (Number(n) < 0 ? '-' : '') + s[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + s[1];
+}
+function muhGun(iso){
+  if (!iso) return '—';
+  const p = String(iso).split('-');
+  return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : iso;
+}
+function muhSuz(){
+  const q = (S.muh.ara || '').trim().toLocaleLowerCase('tr');
+  return muhListe().filter(r => {
+    if (S.muh.yon && r.y !== S.muh.yon) return false;
+    if (S.muh.odeme === 'odendi' && !(r.d === 'o' || r.d === 't')) return false;
+    if (S.muh.odeme === 'oneri'  && r.d !== 'n') return false;
+    if (S.muh.odeme === 'acik'   && r.d) return false;
+    if (q){
+      const h = [r.k, r.n, r.pr].join(' ').toLocaleLowerCase('tr');
+      if (h.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+}
+function muhRozet(r){
+  if (r.d === 'o') return '<span class="mrz ok">&#10003; ödendi</span>';
+  if (r.d === 't') return '<span class="mrz tk">&#8987; taksit</span>';
+  if (r.d === 'n') return '<span class="mrz on">&#9203; öneri</span>';
+  if (r.d === 'p') return '<span class="mrz ks">&#9686; kısmi</span>';
+  return '<span class="mrz yk">—</span>';
+}
+function muhView(){
+  const meta = muhMeta();
+  if (!meta && !muhListe().length){
+    return `<div class="mbos"><h3>Muhasebe verisi yok</h3>
+      <p>Fatura listesi bilgisayardaki TERM'den gönderilir. Bilgisayarda
+      <b>TERM → Muhasebe</b> ekranını bir kez aç; liste buraya düşer.</p>
+      <p class="mbos-n">Tutarlar yalnızca senin hesabına yazılır, uygulamanın
+      açık kaynak dosyalarında durmaz.</p></div>`;
+  }
+  const L = muhSuz();
+  let gelen = 0, giden = 0, acik = 0;
+  L.forEach(r => {
+    const v = (r.p && r.p !== 'TL') ? (r.tl != null ? r.tl : null) : r.v;
+    if (v == null) return;
+    if (r.y === 'G') giden += v; else gelen += v;
+    if (!r.d) acik += v;
+  });
+  const gor = L.slice(0, S.muh.limit);
+  let h = '<div class="mwrap">';
+  h += `<div class="mfilt">
+    <div class="mseg">
+      <button class="msg${S.muh.yon === '' ? ' on' : ''}" data-act="muh-f" data-k="yon" data-v="">Hepsi</button>
+      <button class="msg${S.muh.yon === 'L' ? ' on' : ''}" data-act="muh-f" data-k="yon" data-v="L">Gelen</button>
+      <button class="msg${S.muh.yon === 'G' ? ' on' : ''}" data-act="muh-f" data-k="yon" data-v="G">Giden</button>
+    </div>
+    <div class="mseg">
+      <button class="msg${S.muh.odeme === '' ? ' on' : ''}" data-act="muh-f" data-k="odeme" data-v="">Tümü</button>
+      <button class="msg${S.muh.odeme === 'acik' ? ' on' : ''}" data-act="muh-f" data-k="odeme" data-v="acik">Ödenmemiş</button>
+      <button class="msg${S.muh.odeme === 'oneri' ? ' on' : ''}" data-act="muh-f" data-k="odeme" data-v="oneri">Öneri</button>
+    </div>
+    <input class="mara" id="m-ara" type="search" placeholder="Firma, fatura no, proje…" value="${esc(S.muh.ara)}">
+  </div>`;
+  h += `<div class="mstrip">
+    <div class="mkut"><span>Kayıt</span><b>${L.length}</b></div>
+    <div class="mkut g"><span>Giden</span><b>${muhTL(giden)} ₺</b></div>
+    <div class="mkut l"><span>Gelen</span><b>${muhTL(gelen)} ₺</b></div>
+    ${acik ? `<div class="mkut a"><span>Ödenmemiş</span><b>${muhTL(acik)} ₺</b></div>` : ''}
+  </div>`;
+  h += '<div class="mlist">';
+  gor.forEach(r => {
+    const dv = (r.p && r.p !== 'TL' && r.tl != null) ? `<em>${muhTL(r.tl)} ₺</em>` : '';
+    h += `<div class="mrow ${r.y === 'G' ? 'gd' : 'gl'}">
+      <div class="mr-1"><span class="myon ${r.y === 'G' ? 'g' : 'l'}">${r.y === 'G' ? 'GİDEN' : 'GELEN'}</span>
+        <span class="mtar">${muhGun(r.t)}</span>${muhRozet(r)}</div>
+      <div class="mr-2">${esc(r.k || '—')}</div>
+      <div class="mr-3"><span class="mno">${esc(r.n || '')}</span>
+        <span class="mtut">${muhTL(r.v)} ${r.p === 'TL' ? '₺' : esc(r.p || '')}${dv}</span></div>
+      ${r.pr ? `<div class="mr-4">${esc(r.pr)}</div>` : ''}
+    </div>`;
+  });
+  h += '</div>';
+  if (L.length > gor.length)
+    h += `<button class="mmore" data-act="muh-more">+${L.length - gor.length} fatura daha göster</button>`;
+  if (meta && meta.guncelleme)
+    h += `<p class="mnot">Son güncelleme ${muhGun(meta.guncelleme)}${meta.kapsam ? ' · ' + esc(meta.kapsam) : ''}
+      · veri bilgisayardaki TERM'den gelir</p>`;
+  h += '</div>';
+  return h;
+}
+
 /* ============ render ============ */
 function render(){
+  const gorevde = S.tab === 'week' || S.tab === 'undated' || S.tab === 'jobs';
   document.getElementById('tab-week').setAttribute('aria-selected', S.tab === 'week');
   document.getElementById('tab-und').setAttribute('aria-selected', S.tab === 'undated');
   document.getElementById('tab-jobs').setAttribute('aria-selected', S.tab === 'jobs');
+  const tabsEl = document.querySelector('.topbar .tabs');
+  if (tabsEl) tabsEl.hidden = !gorevde;
+  const homeBtn = document.getElementById('home-btn');
+  if (homeBtn) homeBtn.hidden = S.tab === 'home';
+  const micBtn = document.getElementById('mic');
+  if (micBtn) micBtn.hidden = !gorevde;
+  const bas = document.getElementById('ekran-ad');
+  if (bas){
+    bas.textContent = S.tab === 'muh' ? 'Muhasebe' : gorevde ? 'Görev Takibi' : '';
+    bas.hidden = S.tab === 'home';
+  }
   const undN = S.tasks.filter(t => !t.day && !t.pin && !t.done).length;
   const undRozet = document.getElementById('und-n');
   if (undRozet){ undRozet.textContent = undN || ''; undRozet.hidden = !undN; }
-  main.innerHTML = S.tab === 'week' ? (S.view === 'month' && window.innerWidth >= 1000 ? monthView() : weekView())
+  main.innerHTML = S.tab === 'home' ? homeView()
+    : S.tab === 'muh' ? muhView()
+    : S.tab === 'week' ? (S.view === 'month' && window.innerWidth >= 1000 ? monthView() : weekView())
     : S.tab === 'undated' ? undatedView() : jobsView();
+  const mara = document.getElementById('m-ara');
+  if (mara){
+    let tm = null;
+    mara.oninput = function(){
+      const v = this.value;
+      clearTimeout(tm);
+      tm = setTimeout(() => {
+        S.muh.ara = v; S.muh.limit = 60; render();
+        const a = document.getElementById('m-ara');
+        if (a){ a.focus(); try { a.setSelectionRange(a.value.length, a.value.length); } catch(e){} }
+      }, 220);
+    };
+  }
   const txt = document.getElementById('c-text');
   if (txt){ txt.value = S.draft.text; txt.focus(); try { txt.setSelectionRange(txt.value.length, txt.value.length); } catch(e){} }
   const jc = document.getElementById('j-cust'), jp = document.getElementById('j-proj');
@@ -1962,7 +2127,17 @@ document.addEventListener('click', async (e) => {
   if (!b) return;
   const a = b.dataset.act, id = b.dataset.id;
 
-  if (a === 'tab'){ S.tab = b.dataset.v; S.composer = null; render(); return; }
+  if (a === 'tab'){ S.tab = b.dataset.v; S.gorevTab = b.dataset.v; S.composer = null; render(); return; }
+  if (a === 'home'){ S.tab = 'home'; S.composer = null; render(); return; }
+  if (a === 'kart'){
+    const k = b.dataset.v;
+    if (k === 'gorev'){ S.tab = S.gorevTab || 'week'; S.composer = null; render(); return; }
+    if (k === 'muh'){ S.tab = 'muh'; render(); return; }
+    note('Bu bölüm şimdilik bilgisayardaki TERM\'de.');
+    return;
+  }
+  if (a === 'muh-f'){ S.muh[b.dataset.k] = b.dataset.v; S.muh.limit = 60; render(); return; }
+  if (a === 'muh-more'){ S.muh.limit += 120; render(); return; }
   if (a === 'week'){ S.weekStart = addDays(S.weekStart, 7 * parseInt(b.dataset.v, 10)); S.composer = null; render(); return; }
   if (a === 'month'){
     const d = new Date(S.weekStart.getFullYear(), S.weekStart.getMonth() + parseInt(b.dataset.v, 10), 1);
@@ -2246,12 +2421,14 @@ function bind(store, label, kind){
   S.unsub.push(store.subscribe('tasks', rows => { S.tasks = rows; render(); }));
   S.unsub.push(store.subscribe('contacts', rows => { S.contacts = rows; renderPicker(); }));
   S.unsub.push(store.subscribe('settings', rows => { S.settings = rows; loadA42(true); }));
+  S.unsub.push(store.subscribe('muhasebe', rows => { S.muhasebe = rows; if (S.tab === 'muh') render(); }));
 }
 
 /* ============ açılış ============ */
 try {
   const v = new URLSearchParams(location.search).get('v');
-  if (v === 'jobs' || v === 'week' || v === 'undated') S.tab = v;
+  if (v === 'jobs' || v === 'week' || v === 'undated'){ S.tab = v; S.gorevTab = v; }
+  else if (v === 'muhasebe' || v === 'muh') S.tab = 'muh';
 } catch(e){}
 render();
 bind(localStore(), 'yerel', 'off');
