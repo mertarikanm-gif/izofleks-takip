@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term6";
+const APP_VERSION = "2026.09.20-term7";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2124,8 +2124,10 @@ function render(){
   document.getElementById('tab-jobs').setAttribute('aria-selected', S.tab === 'jobs');
   const tabsEl = document.querySelector('.topbar .tabs');
   if (tabsEl) tabsEl.hidden = !gorevde;
-  const homeBtn = document.getElementById('home-btn');
-  if (homeBtn) homeBtn.hidden = S.tab === 'home';
+  const backBtn = document.getElementById('back-btn');
+  if (backBtn) backBtn.hidden = S.tab === 'home';
+  const markaEl = document.querySelector('.topbar .brand');
+  if (markaEl) markaEl.classList.toggle('tiklanir', S.tab !== 'home');
   const micBtn = document.getElementById('mic');
   if (micBtn) micBtn.hidden = !gorevde;
   const bas = document.getElementById('ekran-ad');
@@ -2331,7 +2333,7 @@ document.addEventListener('click', async (e) => {
   const a = b.dataset.act, id = b.dataset.id;
 
   if (a === 'tab'){ S.gorevTab = b.dataset.v; S.composer = null; ekranAc(b.dataset.v); return; }
-  if (a === 'home'){ anaEkrana(false); return; }
+  if (a === 'home' || a === 'geri'){ anaEkrana(false); return; }
   if (a === 'kart'){
     const k = b.dataset.v;
     if (k === 'gorev'){ S.composer = null; ekranAc(S.gorevTab || 'week'); return; }

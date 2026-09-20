@@ -612,11 +612,17 @@ html,body{overscroll-behavior-x:contain;}
 .vfix-r .btn{flex:0 0 auto;}
 
 /* ============ TERM ana ekran (kart ızgarası) ============ */
-.homebtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;
+.backbtn{display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 12px 0 9px;
   border-radius:9px;border:1px solid var(--bar-line);background:var(--bar-soft);color:var(--bar-ink);
-  flex:0 0 auto;margin-left:2px;}
-.homebtn svg{width:19px;height:19px;}
-.homebtn:hover{background:rgba(255,255,255,.18);}
+  flex:0 0 auto;margin-left:2px;font-size:13px;font-weight:600;}
+.backbtn svg{width:18px;height:18px;flex:0 0 auto;}
+.backbtn:hover{background:rgba(255,255,255,.18);}
+.backbtn:active{transform:scale(.96);}
+@media (max-width:420px){.backbtn .bt{display:none;}.backbtn{padding:0 9px;}}
+/* logo = ana ekran */
+.topbar .brand{cursor:default;}
+.topbar .brand.tiklanir{cursor:pointer;}
+.topbar .brand.tiklanir:hover{opacity:.82;}
 .ekranad{font-family:var(--f-disp);font-weight:600;font-size:14.5px;color:var(--bar-ink);
   white-space:nowrap;margin-left:2px;}
 @media (max-width:560px){.ekranad{display:none;}}
