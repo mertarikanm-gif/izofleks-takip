@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term4";
+const APP_VERSION = "2026.09.20-term5";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -657,6 +657,24 @@ function tkfKimlik(id){
   return 'tkf-' + h.toString(36) + (slug ? '-' + slug : '');
 }
 
+/* Apps Script web uygulaması: tarayıcıda birden fazla Google hesabı açıkken
+   çerezli istek 404 dönüyor (dağıtımın sahibi kişisel hesap, aktif hesap başka).
+   Çerezsiz (credentials:'omit') istek 200 dönüyor — bu yüzden JSONP yerine
+   çerezsiz fetch kullanıyoruz. Yanıt yine "cb({...});" sarmalında geliyor. */
+async function sheetCek(url, ms){
+  const hedef = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list&cb=t&r=' + Math.random();
+  const kesici = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const zaman = setTimeout(() => { try { kesici && kesici.abort(); } catch(e){} }, ms || 45000);
+  try {
+    const r = await fetch(hedef, { credentials: 'omit', signal: kesici ? kesici.signal : undefined });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const t = (await r.text()).trim();
+    const a = t.indexOf('('), b = t.lastIndexOf(')');
+    if (a < 0 || b <= a) throw new Error('beklenmeyen yanıt');
+    return JSON.parse(t.slice(a + 1, b));
+  } finally { clearTimeout(zaman); }
+}
+
 let a42Bekliyor = false;
 async function loadA42(yumusak){
   const url = getSetting('a42url');
@@ -665,7 +683,13 @@ async function loadA42(yumusak){
   if (yumusak && S.a42.at && Date.now() - S.a42.at < 600000) return;
   a42Bekliyor = true;
   try {
-    const res = await jsonp(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list', 45000);
+    let res = null;
+    try {
+      res = await sheetCek(url, 45000);
+    } catch(e1){
+      /* fetch engellenirse eski JSONP yoluna düş */
+      res = await jsonp(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'fn=list', 45000);
+    }
     if (res && res.ok){
       S.a42 = { isler: res.isler || [], teklifler: res.teklifler || [], at: Date.now(), hata: '' };
     } else {
