@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.21-term14";
+const APP_VERSION = "2026.09.21-term15";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2807,6 +2807,22 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) devi
   setTimeout(() => { devirUygula(); render(); geceYarisi(); }, yarin - d);
 })();
 
+/* Kaydırma koruması: parmak kaydırırken ya da kaydırma biter bitmez gelen "tık"
+   İş Takip satırlarını açıp kapatmasın (hızlı kaydırmayı durdurmak için yapılan dokunuş dahil). */
+let _dokunBas = null, _dokunKaydi = false, _sonKaydirma = 0;
+document.addEventListener('scroll', () => { _sonKaydirma = Date.now(); }, { passive:true, capture:true });
+document.addEventListener('touchstart', (e) => {
+  const t = e.touches && e.touches[0]; if (!t) return;
+  // kaydırma hâlâ sürerken (momentum) başlayan dokunuş = kaydırmayı durdurma, tık sayılmaz
+  _dokunKaydi = (Date.now() - _sonKaydirma) < 120;
+  _dokunBas = { x: t.clientX, y: t.clientY };
+}, { passive:true });
+document.addEventListener('touchmove', (e) => {
+  const t = e.touches && e.touches[0]; if (!t || !_dokunBas) return;
+  if (Math.abs(t.clientY - _dokunBas.y) > 8 || Math.abs(t.clientX - _dokunBas.x) > 8) _dokunKaydi = true;
+}, { passive:true });
+function kaydirmaTiki(){ return _dokunKaydi || (Date.now() - _sonKaydirma) < 300; }
+
 /* ============ olaylar ============ */
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]');
@@ -2836,6 +2852,7 @@ document.addEventListener('click', async (e) => {
   /* ---- İş Takip işlemleri ---- */
   if (a === 'it-sec'){
     if (e.target.closest('.itact')) return;      // buton tıklaması satırı kapatmasın
+    if (kaydirmaTiki()) return;                   // kaydırma sonu dokunuşu satırı açıp kapatmasın
     S.itSec = (S.itSec === b.dataset.k) ? '' : b.dataset.k;
     render(); return;
   }
