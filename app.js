@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.20-term11";
+const APP_VERSION = "2026.09.21-term14";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -39,7 +39,7 @@ function rangeLabel(a, b){
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ============ depo: yerel ============ */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok'];
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'gecmis'];
 
 function localStore(){
   let data = {};
@@ -85,7 +85,8 @@ const S = {
   gorevTab: 'week',
   weekStart: mondayOf(new Date()),
   view: (() => { try { return localStorage.getItem('izo-view') === 'month' ? 'month' : 'week'; } catch(e){ return 'week'; } })(),
-  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [],
+  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], gecmis: [],
+  gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
   stk: { firma:'', ara:'', limit:60 },
   a42: { isler: [], teklifler: [], faturalar: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
@@ -297,7 +298,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : jobLabelHtml(j)}<span class="tt">${esc(t.text)}${meta}</span></span>
-    <span class="acts">${t.day ? `<button class="fwd" data-act="day-fwd" data-id="${t.id}" aria-label="Bir gün ileri al" title="Bir gün ileri">\u203A</button>` : ''}<button class="editb" data-act="task-edit" data-id="${t.id}" aria-label="Düzenle" title="Düzenle">${ICON_EDIT}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
+    <span class="acts">${t.day ? `<button class="fwd${t.devir ? ' devir' : ''}" data-act="day-fwd" data-id="${t.id}" aria-label="${t.devir ? 'Bitene kadar her gün taşınıyor — kapatmak için basılı tut' : 'Bir gün ileri — bitene kadar taşımak için basılı tut'}" title="${t.devir ? 'Bitene kadar her gün taşınıyor · kapatmak için basılı tut' : 'Dokun: bir gün ileri · Basılı tut: bitene kadar her gün taşı'}">${t.devir ? '\u21BB' : '\u203A'}</button>` : ''}<button class="editb" data-act="task-edit" data-id="${t.id}" aria-label="Düzenle" title="Düzenle">${ICON_EDIT}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
 
@@ -1160,12 +1161,17 @@ async function komutCoz(metin){
     '',
     'İŞLEMLER:',
     '- ekle: yeni görev. isId + metin zorunlu, gun/sabit isteğe bağlı.',
+    '    VARSAYILAN İŞLEM BUDUR. Kullanıcı yeni bir iş/fikir/hatırlatma söylüyorsa (cümlede "ekle", "yaz", "not al", "hatırlat", "sabitlere ekle" olsa da olmasa da) → ekle.',
+    '    Söylenen metin mevcut bir görevin metnine BENZESE bile, kullanıcı o görevi açıkça işaret etmiyorsa YENİ görev ekle — var olanı değiştirme.',
     '- tasi: var olan görevin gününü değiştir ("cumaya al", "yarına kaydır", "tarihsize at" → gun null). gorevId + gun.',
     '- sil: görevi kaldır — "sil", "kaldır", "iptal et", "çıkar", "listeden çıkar". gorevId.',
     '- bitti: görevi tamamlandı işaretle — "bitti", "tamamlandı", "yapıldı", "tikle", "işaretle", "halloldu", "bitirdim". gorevId.',
     '- geri-al: tamamlanmış görevi tekrar aç ("geri al", "bitmedi", "aç"). gorevId.',
     '- sabitle / sabit-kaldir: görevi sabit panele al / oradan çıkar. gorevId.',
     '- duzenle: görev metnini değiştir. metin = YENİ TAM METİN.',
+    '    SADECE kullanıcı var olan BELİRLİ bir görevi açıkça işaret edip ("şu görevi", "… görevinin adını", "… yazanı") değiştirme fiili kullanırsa:',
+    '    "değiştir", "düzelt", "yerine … yaz", "adını … yap", "güncelle", "… görevine şunu da ekle". Bunlardan biri yoksa duzenle SEÇME.',
+    '    ekle ile duzenle arasında kararsızsan HER ZAMAN ekle seç — ekleme geri alınabilir, üzerine yazma veri kaybettirir.',
     '    "şunu da ekle / notunu ekle" → eski metni aynen koru, sonuna ", <yeni>" ekleyip tam metni yaz.',
     '    "şunu çıkar" → o kısmı ayıklayıp kalan tam metni yaz.',
     '- is-degistir: var olan görevi BAŞKA bir işe/başlığa taşı (“şunu tedarikçiye al”, “bunu muhasebeye taşı”, “mimarın işine bağla”). gorevId + isId zorunlu; gün değişmez.',
@@ -1247,15 +1253,19 @@ function komutSonuc(veri, ham){
     return;
   }
   const guven = +o.guven || 0;
-  /* Silme asla kendiliğinden yapılmaz — her zaman onay ister. */
-  const esik = islem === 'sil' ? 2 : (islem === 'ekle' ? 0.75 : 0.8);
+  /* Silme ve metin değiştirme asla kendiliğinden yapılmaz — her zaman onay ister
+     (üzerine yazılan metin geri gelmez). */
+  const esik = (islem === 'sil' || islem === 'duzenle') ? 2 : (islem === 'ekle' ? 0.75 : 0.8);
   if (guven >= esik){ komutUygula(o, true); return; }
-  const soru = o.soru || (islem === 'sil' ? 'Bu görev silinsin mi?' : 'Doğru mu?');
+  const soru = o.soru || (islem === 'sil' ? 'Bu görev silinsin mi?'
+    : islem === 'duzenle' ? 'Bu görevin metni değiştirilsin mi? (Yeni görev eklemek istiyorsan “Yeni görev olarak ekle”ye bas.)'
+    : 'Doğru mu?');
   ekranKilitle();
   vSet('Onay bekliyor', ham);
   document.getElementById('v-body').innerHTML = komutOzet(o) + `<p class="vq">${esc(soru)}</p>`;
   document.getElementById('v-acts').innerHTML =
     `<button class="btn primary${islem === 'sil' ? ' tehlike' : ''}" data-act="voice-ok">${esc(ISLEM_AD[islem] || 'Uygula')}</button>` +
+    (islem === 'duzenle' ? '<button class="btn" data-act="voice-yeni">Yeni görev olarak ekle</button>' : '') +
     '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
   /* onay ekranında kendiliğinden dinlemeye GEÇMİYORUZ — düğmeler kaybolmasın */
@@ -1273,7 +1283,7 @@ function komutCoklu(dizi, ham){
   const iyi = dizi.filter(gecerliMi);
   if (!iyi.length){ komutSonuc(dizi[0] || {}, ham); return; }
   V.coklu = iyi;
-  const silVar = iyi.some(o => String(o.islem) === 'sil');
+  const silVar = iyi.some(o => String(o.islem) === 'sil' || String(o.islem) === 'duzenle');
   const dusuk  = iyi.some(o => (+o.guven || 0) < 0.8);
   if (!silVar && !dusuk){ komutCokluUygula(); return; }
   ekranKilitle();
@@ -1367,7 +1377,7 @@ function komutOzet(o){
         + sat('Görev', t.text || '')
         + sat('İş', j ? jobLabel(j) : '—');
   if (islem === 'tasi')    h += sat('Yeni gün', gunEtiket(o.gun, false)) + sat('Eski gün', gunEtiket(t.day, t.pin));
-  if (islem === 'duzenle') h += sat('Yeni metin', o.metin || '');
+  if (islem === 'duzenle') h += sat('Eski metin', t.text || '') + sat('Yeni metin', o.metin || '');
   if (islem === 'is-degistir') h += sat('Yeni iş', komutIsAdi(o)) + sat('Eski iş', j ? jobLabel(j) : '—');
   if (islem === 'sabitle') h += sat('Sonuç', 'sabit panele taşınır');
   if (islem === 'sabit-kaldir') h += sat('Sonuç', 'tarihsiz listeye döner');
@@ -2390,6 +2400,7 @@ function render(){
   if (tabsEl) tabsEl.hidden = !gorevde;
   const backBtn = document.getElementById('back-btn');
   if (backBtn) backBtn.hidden = S.tab === 'home';
+  gaDugme();
   const markaEl = document.querySelector('.topbar .brand');
   if (markaEl) markaEl.classList.toggle('tiklanir', S.tab !== 'home');
   const micBtn = document.getElementById('mic');
@@ -2590,6 +2601,212 @@ function authMessage(code){
   return map[code] || ('Giriş yapılamadı (' + code + ')');
 }
 
+/* ============ GERİ AL — değişiklik geçmişi ============
+   Görev ve iş kartlarındaki her ekleme / değişiklik / silme, ÖNCEKİ hâliyle birlikte
+   users/{uid}/gecmis'e yazılır. Böylece:
+   · toast kaybolduktan sonra da geri alınabilir,
+   · telefonda yapılan hata masaüstünden geri alınabilir (geçmiş bulutta),
+   · üzerine yazılan metin kaybolmaz.
+   Sıralama (ord) gibi görünmez alanlar kaydedilmez; otomatik devir taşıması da kaydedilmez. */
+const GECMIS_ALAN = ['text', 'day', 'pin', 'done', 'jobId', 'devir', 'customer', 'project', 'archived'];
+let _gecmisKapali = 0;
+function gecmisOzet(c, o){
+  if (!o) return '';
+  return c === 'tasks' ? kisalt(o.text || '')
+       : kisalt([o.customer, o.project].filter(Boolean).join(' · ') || 'iş kartı');
+}
+function gecmisli(ic){
+  const izle = c => (c === 'tasks' || c === 'jobs') && !_gecmisKapali;
+  const bul  = (c, id) => (c === 'tasks' ? S.tasks : S.jobs).find(x => x.id === id);
+  const yaz  = g => { try { ic.add('gecmis', { ...g, zaman: Date.now() }).catch(() => {}); } catch(e){} };
+  return {
+    ...ic,
+    add(c, o){
+      const pr = ic.add(c, o);
+      if (izle(c)) pr.then(id => yaz({ tip:'ekle', c, belge:id, ozet:gecmisOzet(c, o) })).catch(() => {});
+      return pr;
+    },
+    update(c, id, p){
+      if (izle(c)){
+        const v = bul(c, id);
+        if (v){
+          /* boş / false / null / undefined aynı sayılır — "sabit: yok → false" gibi sahte değişiklik yazılmasın */
+          const nrm = x => (x === undefined || x === null || x === false || x === '') ? null : x;
+          const alan = Object.keys(p).filter(k => GECMIS_ALAN.includes(k)
+            && JSON.stringify(nrm(v[k])) !== JSON.stringify(nrm(p[k])));
+          if (alan.length){
+            const once = {}, sonra = {};
+            alan.forEach(k => { once[k] = v[k] === undefined ? null : v[k]; sonra[k] = p[k] === undefined ? null : p[k]; });
+            yaz({ tip:'guncelle', c, belge:id, once, sonra, ozet:gecmisOzet(c, v) });
+          }
+        }
+      }
+      return ic.update(c, id, p);
+    },
+    remove(c, id){
+      if (izle(c)){
+        const v = bul(c, id);
+        if (v){ const { id:_x, ...tam } = v; yaz({ tip:'sil', c, belge:id, once:tam, ozet:gecmisOzet(c, v) }); }
+      }
+      return ic.remove(c, id);
+    }
+  };
+}
+function gecmisAcik(){
+  return (S.gecmis || []).filter(g => !g.geriAlindi).sort((a, b) => (b.zaman || 0) - (a.zaman || 0));
+}
+function gecmisDetay(g){
+  if (g.tip === 'ekle') return g.c === 'tasks' ? 'görev eklendi' : 'iş kartı eklendi';
+  if (g.tip === 'sil')  return g.c === 'tasks' ? 'görev silindi' : 'iş kartı silindi';
+  const o = g.once || {}, s = g.sonra || {}, p = [];
+  const gun = d => d ? shortDate(d) : 'tarihsiz';
+  Object.keys(o).forEach(k => {
+    if (k === 'text') p.push(`metin: “${kisalt(o.text || '')}” → “${kisalt(s.text || '')}”`);
+    else if (k === 'day') p.push(`gün: ${gun(o.day)} → ${gun(s.day)}`);
+    else if (k === 'done') p.push(s.done ? 'bitti işaretlendi' : 'yeniden açıldı');
+    else if (k === 'pin') p.push(s.pin ? 'sabitlendi' : 'sabitten çıkarıldı');
+    else if (k === 'devir') p.push(s.devir ? 'bitene kadar taşı açıldı' : 'otomatik taşıma kapandı');
+    else if (k === 'jobId'){ const j1 = jobById(o.jobId), j2 = jobById(s.jobId);
+      p.push(`iş: ${j1 ? kisalt(jobLabel(j1)) : '—'} → ${j2 ? kisalt(jobLabel(j2)) : '—'}`); }
+    else if (k === 'archived') p.push(s.archived ? 'arşivlendi' : 'arşivden çıkarıldı');
+    else p.push(`${k}: ${o[k] ?? '—'} → ${s[k] ?? '—'}`);
+  });
+  return p.join(' · ');
+}
+function gecmisZaman(ms){
+  const f = (Date.now() - (ms || 0)) / 1000;
+  if (f < 60) return 'az önce';
+  if (f < 3600) return Math.floor(f / 60) + ' dk önce';
+  if (f < 86400) return Math.floor(f / 3600) + ' sa önce';
+  const d = new Date(ms);
+  return d.toLocaleDateString('tr-TR', { day:'numeric', month:'short' }) + ' '
+       + d.toLocaleTimeString('tr-TR', { hour:'2-digit', minute:'2-digit' });
+}
+async function gecmisGeriAl(g){
+  if (!g || !S.store) return;
+  _gecmisKapali++;
+  try {
+    const liste = g.c === 'tasks' ? S.tasks : S.jobs;
+    const varMi = liste.some(x => x.id === g.belge);
+    if (g.tip === 'guncelle'){
+      if (!varMi){ note('Bu kayıt artık yok — önce silme işlemini geri al.'); return; }
+      await S.store.update(g.c, g.belge, g.once || {});
+    } else if (g.tip === 'sil'){
+      await S.store.setId(g.c, g.belge, g.once || {});
+    } else if (g.tip === 'ekle'){
+      if (varMi) await S.store.remove(g.c, g.belge);
+    }
+    await S.store.update('gecmis', g.id, { geriAlindi: Date.now() });
+    note('Geri alındı — ' + (g.ozet || gecmisDetay(g)));
+  } catch(e){
+    note('Geri alınamadı: ' + (e && e.message ? e.message : 'hata'));
+  } finally { _gecmisKapali--; }
+}
+function gaPanelCiz(){
+  const eski = document.getElementById('ga-ov');
+  if (!S.gaAcik){ if (eski) eski.remove(); return; }
+  const L = gecmisAcik().slice(0, 30);
+  const ikon = g => g.tip === 'sil' ? '🗑' : g.tip === 'ekle' ? '＋' : '✎';
+  const h = `<div class="itov gaov" id="ga-ov" data-act="ga-kapat"><div class="itovk" data-act="it-ov-ic">
+    <div class="itovb gab">Geri al — son değişiklikler</div>
+    <div class="itovg">
+      ${L.length ? `<button class="itbtn ok ga-son" data-act="ga-geri" data-id="${esc(L[0].id)}">↶ Son işlemi geri al</button>
+        <div class="galist">${L.map(g => `<div class="garow">
+          <span class="gai ${g.tip}">${ikon(g)}</span>
+          <div class="gat"><b>${esc(g.ozet || '')}</b><span>${esc(gecmisDetay(g))}</span><em>${esc(gecmisZaman(g.zaman))}</em></div>
+          <button class="itbtn gr" data-act="ga-geri" data-id="${esc(g.id)}">Geri al</button>
+        </div>`).join('')}</div>`
+      : '<p class="itovm">Henüz geri alınacak bir değişiklik yok.</p>'}
+      <div class="itovf"><button class="itbtn gr" data-act="ga-kapat">Kapat</button></div>
+    </div></div></div>`;
+  if (eski) eski.outerHTML = h; else document.body.insertAdjacentHTML('beforeend', h);
+}
+function gaDugme(){
+  const b = document.getElementById('ga-btn'); if (!b) return;
+  const n = gecmisAcik().length;
+  b.hidden = !n;
+  const r = b.querySelector('.gan'); if (r) r.textContent = n > 99 ? '99+' : String(n);
+}
+/* masaüstü: Ctrl+Z (yazı alanında değilken) son işlemi geri alır */
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || String(e.key).toLowerCase() !== 'z') return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  const son = gecmisAcik()[0];
+  if (!son) return;
+  e.preventDefault();
+  gecmisGeriAl(son);
+});
+
+/* ============ › düğmesi: dokun = +1 gün · BASILI TUT = "bitene kadar taşı" ============
+   Basılı tutulan görev "devir" moduna girer (t.devir = true): her gün başında,
+   tamamlandı işaretlenene kadar kendiliğinden bugüne taşınır. Tekrar basılı tutmak modu kapatır. */
+let _fwd = null, _fwdSon = 0;
+function fwdBitir(uygula){
+  const f = _fwd; if (!f) return;
+  _fwd = null;
+  clearTimeout(f.zam);
+  f.b.classList.remove('basili');
+  _fwdSon = Date.now();
+  if (!uygula) return;
+  const t = S.tasks.find(x => x.id === f.id);
+  if (!t) return;
+  if (f.uzun){
+    const ac = !t.devir;
+    const p = { devir: ac };
+    if (ac && t.day && t.day < todayIso()) p.day = todayIso();   // gecikmişse hemen bugüne al
+    S.store.update('tasks', f.id, p);
+    note(ac ? 'Bitene kadar her gün taşınacak \u21BB' : 'Otomatik taşıma kapatıldı');
+    return;
+  }
+  if (!t.day) return;
+  const yeni = iso(addDays(fromIso(t.day), 1));
+  S.store.update('tasks', f.id, { day: yeni });
+  if (yeni > iso(addDays(S.weekStart, 6))) note('Gelecek haftaya taşındı — ' + shortDate(yeni));
+}
+document.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('[data-act="day-fwd"]');
+  if (!b || (e.button !== undefined && e.button !== 0)) return;
+  const t = S.tasks.find(x => x.id === b.dataset.id);
+  if (!t) return;
+  if (_fwd) fwdBitir(false);
+  e.preventDefault();
+  try { b.setPointerCapture(e.pointerId); } catch(_){}
+  const f = _fwd = { b, id: t.id, uzun: false, zam: null };
+  f.zam = setTimeout(() => {                    // 0,6 sn basılı → mod değişecek
+    if (_fwd !== f) return;
+    f.uzun = true;
+    b.classList.add('basili');
+    try { navigator.vibrate && navigator.vibrate(15); } catch(_){}
+  }, 600);
+});
+document.addEventListener('pointerup', () => { if (_fwd) fwdBitir(true); });
+document.addEventListener('pointercancel', () => { if (_fwd) fwdBitir(_fwd.uzun); });
+document.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('[data-act="day-fwd"]')) e.preventDefault();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _fwd) fwdBitir(false); });
+
+/* Devir modundaki, bitmemiş ve günü geçmiş görevleri bugüne al.
+   Görevler her geldiğinde, uygulama öne geldiğinde ve gece yarısı çalışır.
+   Birden fazla cihaz aynı anda çalıştırsa da sonuç aynı (bugün) — çakışma olmaz. */
+let _devirCalisiyor = false;
+function devirUygula(){
+  if (!S.store || _devirCalisiyor) return;
+  const bugun = todayIso();
+  const ids = S.tasks.filter(t => t.devir && !t.done && !t.pin && t.day && t.day < bugun).map(t => t.id);
+  if (!ids.length) return;
+  _devirCalisiyor = true;
+  _gecmisKapali++;
+  try { ids.forEach(id => S.store.update('tasks', id, { day: bugun })); }
+  finally { _devirCalisiyor = false; _gecmisKapali--; }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) devirUygula(); });
+(function geceYarisi(){
+  const d = new Date(), yarin = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 5);
+  setTimeout(() => { devirUygula(); render(); geceYarisi(); }, yarin - d);
+})();
+
 /* ============ olaylar ============ */
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]');
@@ -2598,6 +2815,9 @@ document.addEventListener('click', async (e) => {
 
   if (a === 'tab'){ S.gorevTab = b.dataset.v; S.composer = null; ekranAc(b.dataset.v); return; }
   if (a === 'home' || a === 'geri'){ anaEkrana(false); return; }
+  if (a === 'ga-ac'){ S.gaAcik = true; gaPanelCiz(); return; }
+  if (a === 'ga-kapat'){ S.gaAcik = false; gaPanelCiz(); return; }
+  if (a === 'ga-geri'){ const g = (S.gecmis || []).find(x => x.id === id); await gecmisGeriAl(g); return; }
   if (a === 'kart'){
     const k = b.dataset.v;
     if (k === 'gorev'){ S.composer = null; ekranAc(S.gorevTab || 'week'); return; }
@@ -2656,6 +2876,7 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (a === 'day-fwd'){
+    if (Date.now() - _fwdSon < 800) return;   // dokunma/basılı tutma zaten pointerup'ta işlendi
     const t = S.tasks.find(x => x.id === id);
     if (!t || !t.day) return;
     const yeni = iso(addDays(fromIso(t.day), 1));
@@ -2743,6 +2964,14 @@ document.addEventListener('click', async (e) => {
   if (a === 'voice-coklu'){ komutCokluUygula(); return; }
   if (a === 'voice-close'){ voiceKapat(); return; }
   if (a === 'voice-ok'){ if (V.sonuc) komutUygula(V.sonuc, false); return; }
+  if (a === 'voice-yeni'){          // "değiştir" yanlış anlaşıldıysa: aynı iş/panele YENİ görev olarak ekle
+    const o = V.sonuc; if (!o) return;
+    const t = S.tasks.find(x => x.id === o.gorevId);
+    if (!t){ komutUygula({ ...o, islem:'ekle' }, false); return; }
+    komutUygula({ islem:'ekle', isId:'job:' + t.jobId, metin:o.metin, sabit:!!t.pin,
+                  gun: t.pin ? null : (t.day || null), guven:1 }, false);
+    return;
+  }
   if (a === 'ai-save'){
     const v = (document.getElementById('a-key')?.value || '').trim();
     if (!v){ await setSetting('claudekey',''); await setSetting('claudemodel',''); openSheet(); note('Anahtar kaldırıldı.'); return; }
@@ -2906,15 +3135,16 @@ document.addEventListener('keydown', e => {
 function bind(store, label, kind){
   S.unsub.forEach(u => { try { u(); } catch(e){} });
   S.unsub = [];
-  S.store = store;
-  S.jobs = []; S.tasks = []; S.contacts = []; S.settings = [];
+  S.store = gecmisli(store);
+  S.jobs = []; S.tasks = []; S.contacts = []; S.settings = []; S.gecmis = [];
   setSync(kind, label);
   S.unsub.push(store.subscribe('jobs', rows => { S.jobs = rows.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); render(); renderPicker(); }));
-  S.unsub.push(store.subscribe('tasks', rows => { S.tasks = rows; render(); }));
+  S.unsub.push(store.subscribe('tasks', rows => { S.tasks = rows; render(); devirUygula(); }));
   S.unsub.push(store.subscribe('contacts', rows => { S.contacts = rows; renderPicker(); }));
   S.unsub.push(store.subscribe('settings', rows => { S.settings = rows; loadA42(true); }));
   S.unsub.push(store.subscribe('muhasebe', rows => { S.muhasebe = rows; if (S.tab === 'muh') render(); }));
   S.unsub.push(store.subscribe('stok', rows => { S.stok = rows; if (S.tab === 'stok') render(); }));
+  S.unsub.push(store.subscribe('gecmis', rows => { S.gecmis = rows; gaDugme(); gaPanelCiz(); }));
 }
 
 /* ============ açılış ============ */
