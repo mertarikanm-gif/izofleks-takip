@@ -241,7 +241,7 @@ body.dragging{cursor:grabbing;user-select:none;-webkit-user-select:none;}
 .task .fwd{font-size:17px;padding:0 5px;line-height:20px;}
 .task .fwd:hover{color:var(--accent-ink);background:var(--accent-soft);}
 /* basılı tutma (0,6 sn) = "bitene kadar her gün taşı" modu */
-.task .fwd{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+.task .fwd{touch-action:pan-y;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
   transition:background .15s ease,color .15s ease,transform .15s ease;}
 .task .fwd.basili{opacity:1;color:var(--on-accent);background:var(--accent);transform:scale(1.12);}
 .task .fwd.devir{opacity:1;color:var(--accent-ink);background:var(--accent-soft);font-size:15px;font-weight:700;}
@@ -782,3 +782,11 @@ html,body{overscroll-behavior-x:contain;}
 .gat span{font-size:11.5px;color:var(--ink-2);overflow-wrap:anywhere;}
 .gat em{font-style:normal;font-family:var(--f-mono);font-size:10px;color:var(--ink-3);margin-top:2px;}
 .garow .itbtn{padding:7px 11px;min-height:32px;font-size:12px;}
+
+/* ---- sessiz kayıt: ses seviyesi + süre ---- */
+.vseviye{--lv:0;position:relative;height:10px;border-radius:6px;background:var(--panel-2);
+  border:1px solid var(--line);overflow:hidden;margin:6px 0 10px;}
+.vseviye i{position:absolute;left:0;top:0;bottom:0;width:calc(6% + var(--lv) * 94%);
+  background:linear-gradient(90deg,var(--ok),var(--accent));transition:width .08s linear;}
+.vseviye::after{content:attr(data-t);position:absolute;right:0;top:-18px;font-family:var(--f-mono);
+  font-size:10.5px;color:var(--ink-3);}

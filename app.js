@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.21-term15";
+const APP_VERSION = "2026.09.22-term17";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -786,6 +786,7 @@ function voiceAc(){
 function voiceKapat(){
   V.acik = false;
   sesIptal = true;
+  kayitIptal();
   V.cevapModu = false;
   soruTur = 0;
   susturKonus();
@@ -812,6 +813,7 @@ function susturKonus(){ try { if (window.speechSynthesis) speechSynthesis.cancel
 
 /* Konuşmayı yalnızca kullanıcı bitirir — otomatik kapanma yok. */
 function sesBitir(){
+  if (kayit){ kayitBitir(); return; }
   if (sesBitti) return;
   sesBitti = true;
   try { sesTanir && sesTanir.stop(); } catch(e){}
@@ -825,20 +827,20 @@ function sesBitir(){
 }
 
 function sesBaslat(){
-  if (!sesDestek()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor (Chrome gerekir).'); return; }
+  if (!sesDestek() && !kayitMotoru()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor (Chrome gerekir).'); return; }
   if (!getSetting('claudekey')){ note('Önce senkron penceresinden Claude API anahtarını girin.'); openSheet(); return; }
-  if (sesTanir){ sesBitir(); return; }
+  if (sesTanir || kayit){ sesBitir(); return; }
   susturKonus();
   voiceAc();
   sesGecmis = []; soruTur = 0;            /* yeni komut → geçmiş sıfır */
   sesBitti = false; sesIptal = false; sesSon = ''; sesKesin = ''; sesAlt = []; sesTur = 0;
-  sesDinle();
+  if (kayitMotoru()) kayitBaslat(); else sesDinle();
 }
 
 /* Programin sorusuna sesli cevap: geçmişi koruyarak yeniden dinle */
 function sesCevapla(){
-  if (!sesDestek()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor.'); return; }
-  if (sesTanir){ sesBitir(); return; }
+  if (!sesDestek() && !kayitMotoru()){ note('Bu tarayıcı konuşma tanımayı desteklemiyor.'); return; }
+  if (sesTanir || kayit){ sesBitir(); return; }
   ekranBilet++;
   if (soruZaman){ clearTimeout(soruZaman); soruZaman = null; }
   sesIptal = false;
@@ -851,7 +853,7 @@ function sesCevapla(){
   vSet('Dinleniyor…', '');
   sesBitti = false; sesIptal = false; sesSon = ''; sesKesin = ''; sesAlt = []; sesTur = 0;
   V.cevapModu = true;
-  sesDinle();
+  if (kayitMotoru()) kayitBaslat(); else sesDinle();
 }
 
 /* ---- konuşma metni temizliği ----
@@ -992,6 +994,138 @@ function sesDinle(){
   try { r.start(); } catch(e){ note('Mikrofon başlatılamadı.'); voiceKapat(); }
 }
 
+/* ============ SES MOTORU 2: sessiz kayıt + OpenAI yazıya çevirme ============
+   Android'in konuşma tanıyıcısı başlarken ve her duraklamada "bip" çalıyor, duraklamada
+   oturumu da kesiyor. OpenAI anahtarı tanımlıysa sesi uygulamanın kendisi kaydeder
+   (hiç ses çıkmaz, duraklamada kesilmez), "Bitir"e basınca tek parça halinde
+   gpt-4o-transcribe'a gönderir. Anahtar yoksa eski motor (tarayıcı tanıyıcısı) çalışır. */
+const KAYIT_DESTEK = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+const kayitMotoru = () => KAYIT_DESTEK && !!getSetting('openaikey');
+const KAYIT_SINIR = 150;             /* saniye — unutulan mikrofon açık kalmasın */
+let kayit = null;
+
+/* Yazıya çevirmeye ipucu: özel adlar ve sektör terimleri doğru yazılsın */
+function sesIpucu(){
+  const adlar = [];
+  const ekle = s => { s = String(s || '').replace(/\(teklif\)/g, '').trim(); if (s && s !== 'GENEL' && adlar.indexOf(s) < 0) adlar.push(s); };
+  aiIsListesi().forEach(x => { ekle(x.m); ekle(x.p); });
+  let ad = '';
+  for (const a of adlar){ if ((ad + a).length > 700) break; ad += (ad ? ', ' : '') + a; }
+  return 'Bir alüminyum doğrama firmasının iş takip uygulamasına verilen Türkçe sesli komut. '
+    + 'Terimler: İzofleks, TARS, A42 cam bölme, süpürgelik, kapı kasası, kanat, profil, eloksal, RAL, '
+    + 'metraj, teklif, hakediş, fatura, sipariş, montaj, keşif, tedarikçi, sabit, tarihsiz. '
+    + (ad ? 'Geçebilecek adlar: ' + ad + '.' : '');
+}
+
+async function kayitBaslat(){
+  if (kayit){ kayitBitir(); return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true, channelCount:1 } });
+  } catch(e){
+    vEl().classList.remove('dinliyor');
+    vSet('Mikrofon izni verilmedi.', '');
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  if (!V.acik){ stream.getTracks().forEach(t => t.stop()); return; }
+  const tip = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+    .find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+  let rec;
+  try { rec = new MediaRecorder(stream, tip ? { mimeType: tip, audioBitsPerSecond: 48000 } : undefined); }
+  catch(e){ rec = new MediaRecorder(stream); }
+  const k = kayit = { rec, stream, parcalar: [], bas: Date.now(), tip: rec.mimeType || tip || 'audio/webm', raf: 0 };
+  rec.ondataavailable = e => { if (e.data && e.data.size) k.parcalar.push(e.data); };
+  rec.onstop = () => kayitIsle(k);
+  rec.start(1000);
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    k.ctx = new AC();
+    const src = k.ctx.createMediaStreamSource(stream);
+    k.an = k.ctx.createAnalyser(); k.an.fftSize = 512; src.connect(k.an);
+  } catch(e){}
+  vEl().classList.add('dinliyor');
+  vSet('Dinleniyor — bitince “Bitir”e bas', '');
+  const body = document.getElementById('v-body');
+  if (body) body.innerHTML = '<div class="vseviye" id="v-seviye" data-t="0:00"><i></i></div>'
+    + '<p class="vq">Rahat konuş, duraklayabilirsin — kayıt sen bitirene kadar sürer.</p>';
+  const buf = new Uint8Array(512);
+  const ciz = () => {
+    if (kayit !== k) return;
+    const s = Math.floor((Date.now() - k.bas) / 1000);
+    let lv = 0;
+    if (k.an){ k.an.getByteTimeDomainData(buf); let m = 0; for (let i = 0; i < buf.length; i++) m = Math.max(m, Math.abs(buf[i] - 128)); lv = Math.min(1, m / 50); }
+    const el = document.getElementById('v-seviye');
+    if (el){ el.style.setProperty('--lv', lv.toFixed(2)); el.dataset.t = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+    if (s >= KAYIT_SINIR){ kayitBitir(); return; }
+    k.raf = requestAnimationFrame(ciz);
+  };
+  ciz();
+}
+function kayitBitir(){
+  const k = kayit; if (!k) return;
+  kayit = null;
+  try { cancelAnimationFrame(k.raf); } catch(e){}
+  try { if (k.rec.state !== 'inactive') k.rec.stop(); else kayitIsle(k); } catch(e){ kayitIsle(k); }
+  try { k.stream.getTracks().forEach(t => t.stop()); } catch(e){}
+  try { k.ctx && k.ctx.close(); } catch(e){}
+}
+function kayitIptal(){ if (kayit){ kayit.iptal = true; kayitBitir(); } }
+
+async function kayitIsle(k){
+  if (k.islendi) return; k.islendi = true;
+  if (k.iptal || !V.acik) return;
+  vEl().classList.remove('dinliyor');
+  const blob = new Blob(k.parcalar, { type: k.tip });
+  const sure = (Date.now() - k.bas) / 1000;
+  if (!blob.size || sure < 0.6){
+    vSet('Bir şey duyamadım.', '');
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  vSet('Yazıya çevriliyor…', '');
+  const body = document.getElementById('v-body'); if (body) body.innerHTML = '<p class="vq">Bir saniye…</p>';
+  document.getElementById('v-acts').innerHTML = '<button class="btn" data-act="voice-close">Vazgeç</button>';
+  try {
+    const metin = await yaziyaCevir(blob, k.tip);
+    if (!V.acik) return;
+    if (!metin){ throw new Error('boş sonuç'); }
+    sesSon = metin; V.metin = metin; sesAlt = [];
+    vSet(null, metin);
+    komutCoz(metin);
+  } catch(e){
+    if (!V.acik) return;
+    vSet('Yazıya çevrilemedi: ' + e.message, '');
+    document.getElementById('v-body').innerHTML = yazDuzeltHtml('');
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="mic">Tekrar dene</button><button class="btn" data-act="voice-close">Kapat</button>';
+  }
+}
+
+async function yaziyaCevir(blob, tip){
+  const key = getSetting('openaikey');
+  if (!key) throw new Error('OpenAI anahtarı yok');
+  const uz = /mp4|m4a|aac/.test(tip) ? 'm4a' : /ogg/.test(tip) ? 'ogg' : /wav/.test(tip) ? 'wav' : 'webm';
+  let sonHata = null;
+  for (const model of ['gpt-4o-transcribe', 'whisper-1']){
+    const fd = new FormData();
+    fd.append('file', blob, 'komut.' + uz);
+    fd.append('model', model);
+    fd.append('language', 'tr');
+    fd.append('prompt', sesIpucu());
+    fd.append('response_format', 'json');
+    const r = await fetch('https://api.openai.com/v1/audio/transcriptions',
+      { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) return String(j.text || '').trim();
+    sonHata = new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+    if (r.status === 401 || r.status === 429) break;   /* anahtar/kota sorunu — diğer modeli denemenin anlamı yok */
+  }
+  throw sonHata || new Error('bilinmeyen hata');
+}
+
 /* --- Claude --- */
 const AI_URL = 'https://api.anthropic.com/v1/';
 async function aiFetch(yol, govde){
@@ -1008,7 +1142,8 @@ async function aiFetch(yol, govde){
 async function aiModelSec(){
   const j = await aiFetch('models?limit=40');
   const ids = (j.data || []).map(m => m.id);
-  const m = ids.find(x => /haiku/.test(x)) || ids.find(x => /sonnet/.test(x)) || ids[0];
+  /* karmaşık cümleler için Sonnet (liste en yeniden eskiye geliyor → en yeni Sonnet) */
+  const m = ids.find(x => /sonnet/.test(x)) || ids.find(x => /opus/.test(x)) || ids.find(x => /haiku/.test(x)) || ids[0];
   if (!m) throw new Error('Model listesi boş');
   return m;
 }
@@ -1177,6 +1312,13 @@ async function komutCoz(metin){
     '- is-degistir: var olan görevi BAŞKA bir işe/başlığa taşı (“şunu tedarikçiye al”, “bunu muhasebeye taşı”, “mimarın işine bağla”). gorevId + isId zorunlu; gün değişmez.',
     '- anlasilmadi: emin değilsen. soru alanını doldur.',
     '',
+    'KARMAŞIK CÜMLELER:',
+    '- Önce cümleyi ayrı işlemlere böl; "ve", "ama", "ayrıca", "bir de", "sonra", "onu da" gibi bağlaçlar çoğu zaman YENİ bir işlem başlatır → JSON DİZİSİ döndür.',
+    '- Her işlemin işini, gününü ve metnini KENDİ parçasından al. Bir parçada söylenen gün ya da iş, açıkça "ikisini de" denmedikçe diğer parçaya taşınmaz.',
+    '- "bunu", "onu", "şunu" gibi göndermeler aynı cümlede az önce adı geçen göreve/işe aittir.',
+    '- Kullanıcı konuşurken kendini düzeltirse ("pazartesi… yok salı") SON söyleneni al.',
+    '- metin alanına komut kalıbını değil, yapılacak işin kendisini yaz; mimar/proje adını metne tekrar koyma (iş zaten bağlı).',
+    '',
     'KURALLAR:',
     '- isId: İŞ LİSTESİ’nden EN İYİ eşleşen id; eşleşme yoksa null ve guven düşük.',
     '- Müşterisinde "(teklif)" yazanlar henüz işe dönüşmemiş, verilmiş tekliflerdir — takip görevi (arama, hatırlatma, revizyon) bunlara bağlanabilir.',
@@ -1198,7 +1340,7 @@ async function komutCoz(metin){
 
   try {
     let model = getSetting('claudemodel');
-    if (!model){ model = await aiModelSec(); await setSetting('claudemodel', model); }
+    if (!model || /haiku/i.test(model)){ model = await aiModelSec(); await setSetting('claudemodel', model); }
     const altlar = (sesAlt || []).filter(x => norm(x) !== norm(metin)).slice(0, 3);
     const kullanici = altlar.length
       ? metin + '\n\n(ALTERNATİF tahminler: ' + altlar.join(' | ') + ')'
@@ -1206,7 +1348,7 @@ async function komutCoz(metin){
     sesGecmis.push({ role: 'user', content: kullanici });
     if (sesGecmis.length > 9) sesGecmis = sesGecmis.slice(-9);
     const j = await aiFetch('messages', {
-      model, max_tokens: 400, system: sistem, messages: sesGecmis
+      model, max_tokens: 900, system: sistem, messages: sesGecmis
     });
     const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
     const veri = jsonAyikla(txt);
@@ -2573,13 +2715,20 @@ function aiAlani(){
   const k = getSetting('claudekey'), m = getSetting('claudemodel');
   const durum = !k ? 'Tanımlı değil — sesli komut için console.anthropic.com\u2019dan bir API anahtarı alın.'
     : (m ? 'Bağlı · ' + m : 'Anahtar kayıtlı ama model doğrulanmadı — Kaydet ve doğrula deyin.');
-  const destek = (window.SpeechRecognition || window.webkitSpeechRecognition)
+  const destek = (window.SpeechRecognition || window.webkitSpeechRecognition || KAYIT_DESTEK)
     ? '' : '<p class="who">Bu tarayıcı konuşma tanımayı desteklemiyor — Chrome gerekiyor.</p>';
+  const ok = getSetting('openaikey');
+  const odurum = ok ? 'Bağlı — ses uygulamanın kendisi tarafından sessiz kaydediliyor, gpt-4o-transcribe yazıya çeviriyor.'
+    : 'Tanımlı değil — şu an telefonun kendi tanıyıcısı kullanılıyor (başlarken ve duraklamada bip sesi). platform.openai.com\u2019dan API anahtarı alıp buraya yapıştırın.';
   return `<hr class="sep">
-    <label for="a-key">Sesli komut · Claude API anahtarı</label>
+    <label for="a-key">Sesli komut · Claude API anahtarı (anlama)</label>
     <input type="password" id="a-key" placeholder="sk-ant-..." value="${esc(k)}" autocomplete="off" spellcheck="false">
     <p class="who">${esc(durum)}</p>${destek}
-    <div class="row"><button class="btn" data-act="ai-save">Kaydet ve doğrula</button></div>`;
+    <div class="row"><button class="btn" data-act="ai-save">Kaydet ve doğrula</button></div>
+    <label for="a-okey">Sesli komut · OpenAI API anahtarı (yazıya çevirme)</label>
+    <input type="password" id="a-okey" placeholder="sk-..." value="${ok ? '••••••••' + esc(ok.slice(-4)) : ''}" autocomplete="off" spellcheck="false">
+    <p class="who">${esc(odurum)}</p>
+    <div class="row"><button class="btn" data-act="openai-save">Kaydet ve doğrula</button></div>`;
 }
 
 const closeSheet = () => { sheet.hidden = true; };
@@ -2770,18 +2919,24 @@ document.addEventListener('pointerdown', (e) => {
   const t = S.tasks.find(x => x.id === b.dataset.id);
   if (!t) return;
   if (_fwd) fwdBitir(false);
-  e.preventDefault();
-  try { b.setPointerCapture(e.pointerId); } catch(_){}
-  const f = _fwd = { b, id: t.id, uzun: false, zam: null };
-  f.zam = setTimeout(() => {                    // 0,6 sn basılı → mod değişecek
+  /* Dokunmatikte varsayılanı ENGELLEMİYORUZ: parmak buradan başlayıp kaydırırsa sayfa kaysın,
+     işlem iptal olsun. Fareyle metin seçilmesin diye sadece farede engelle. */
+  if (e.pointerType === 'mouse') e.preventDefault();
+  const f = _fwd = { b, id: t.id, uzun: false, zam: null, x: e.clientX, y: e.clientY };
+  f.zam = setTimeout(() => {                    // 0,6 sn KIPIRDAMADAN basılı → mod değişecek
     if (_fwd !== f) return;
     f.uzun = true;
     b.classList.add('basili');
     try { navigator.vibrate && navigator.vibrate(15); } catch(_){}
   }, 600);
 });
+document.addEventListener('pointermove', (e) => {       // parmak kaydıysa bu bir swipe — iptal
+  if (!_fwd) return;
+  if (Math.abs(e.clientX - _fwd.x) > 8 || Math.abs(e.clientY - _fwd.y) > 8) fwdBitir(false);
+});
+document.addEventListener('scroll', () => { if (_fwd) fwdBitir(false); }, { passive:true, capture:true });
 document.addEventListener('pointerup', () => { if (_fwd) fwdBitir(true); });
-document.addEventListener('pointercancel', () => { if (_fwd) fwdBitir(_fwd.uzun); });
+document.addEventListener('pointercancel', () => { if (_fwd) fwdBitir(false); });   // tarayıcı kaydırmayı devraldı → hiçbir şey yapma
 document.addEventListener('contextmenu', (e) => {
   if (e.target.closest('[data-act="day-fwd"]')) e.preventDefault();
 });
@@ -2822,11 +2977,16 @@ document.addEventListener('touchmove', (e) => {
   if (Math.abs(t.clientY - _dokunBas.y) > 8 || Math.abs(t.clientX - _dokunBas.x) > 8) _dokunKaydi = true;
 }, { passive:true });
 function kaydirmaTiki(){ return _dokunKaydi || (Date.now() - _sonKaydirma) < 300; }
+let _sonDokunus = 0;
+document.addEventListener('touchend', () => { _sonDokunus = Date.now(); }, { passive:true, capture:true });
+/* dokunmatikte: bu "tık" bir kaydırmanın parçası mı? (fare/klavye tıklarını etkilemez) */
+function swipeTiki(){ return (Date.now() - _sonDokunus) < 800 && kaydirmaTiki(); }
 
 /* ============ olaylar ============ */
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
+  if (swipeTiki()){ e.preventDefault(); return; }   // ekranı kaydırırken hiçbir komut çalışmasın
   const a = b.dataset.act, id = b.dataset.id;
 
   if (a === 'tab'){ S.gorevTab = b.dataset.v; S.composer = null; ekranAc(b.dataset.v); return; }
@@ -3002,6 +3162,19 @@ document.addEventListener('click', async (e) => {
       await setSetting('claudemodel','');
       openSheet(); note('Anahtar doğrulanamadı: ' + e.message);
     }
+    return;
+  }
+  if (a === 'openai-save'){
+    const v = (document.getElementById('a-okey')?.value || '').trim();
+    if (v.startsWith('••••')){ note('Anahtar zaten kayıtlı — değiştirmek için yenisini yapıştırın.'); return; }
+    if (!v){ await setSetting('openaikey', ''); openSheet(); note('OpenAI anahtarı kaldırıldı — telefonun tanıyıcısına dönüldü.'); return; }
+    if (!/^sk-/.test(v)){ note('OpenAI anahtarı sk- ile başlamalı.'); return; }
+    try {
+      const r = await fetch('https://api.openai.com/v1/models/gpt-4o-transcribe', { headers: { Authorization: 'Bearer ' + v } });
+      if (r.status === 401) throw new Error('anahtar geçersiz');
+      await setSetting('openaikey', v);
+      openSheet(); note(r.ok ? 'OpenAI bağlandı — sesli komut artık sessiz kayıtla çalışıyor.' : 'Kaydedildi (model kontrolü: HTTP ' + r.status + ')');
+    } catch(e){ note('Doğrulanamadı: ' + e.message); }
     return;
   }
   if (a === 'a42-reload'){ S.a42.at = 0; await loadA42(false); openSheet(); return; }
