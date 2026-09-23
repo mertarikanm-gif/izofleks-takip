@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.23-term20";
+const APP_VERSION = "2026.09.23-faz3";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -39,7 +39,7 @@ function rangeLabel(a, b){
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ============ depo: yerel ============ */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'gecmis'];
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'gecmis'];
 
 function localStore(){
   let data = {};
@@ -85,7 +85,7 @@ const S = {
   gorevTab: 'week',
   weekStart: mondayOf(new Date()),
   view: (() => { try { return localStorage.getItem('izo-view') === 'month' ? 'month' : 'week'; } catch(e){ return 'week'; } })(),
-  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], gecmis: [],
+  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], gecmis: [],
   gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
   stk: { firma:'', ara:'', limit:60 },
@@ -1306,9 +1306,11 @@ async function komutCoz(metin){
     'Kullanıcı tek cümlede BİRDEN FAZLA iş söylerse ( “şunu ve şunu” ) JSON DİZİSİ döndür: [{…},{…}]. Tek iş varsa tek nesne.',
     'Şema:',
     '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"is-degistir"',
-    '        |"is-bitir"|"is-sil"|"teklif-gonderildi"|"teklif-red"|"teklif-kabul"|"ekran"|"sorgu"|"anlasilmadi",',
+    '        |"is-bitir"|"is-sil"|"teklif-gonderildi"|"teklif-red"|"teklif-kabul"',
+    '        |"stok-giris"|"stok-cikis"|"ekran"|"sorgu"|"anlasilmadi",',
     ' "isId":string|null,"gorevId":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,',
     ' "metin":string|null,"hedef":string|null,"konu":string|null,"arama":string|null,"sebep":string|null,',
+    ' "stokKod":string|null,"stokMiktar":number|null,"stokBirim":"boy"|"adet"|"m"|"kg"|null,"stokFirma":"izofleks"|"tars"|null,',
     ' "guven":0..1,"soru":string|null}',
     '',
     'İŞLEMLER:',
@@ -1338,6 +1340,14 @@ async function komutCoz(metin){
     '- teklif-kabul: teklif kabul edildi / iş çıktı. isId "tkf:...". Tutar formunu AÇAR, tutarı sen yazmazsın.',
     'DİKKAT: "görevi bitir" ile "işi bitir" AYRI şeylerdir. Kullanıcı bir GÖREV metnini işaret ediyorsa bitti,',
     'bir MÜŞTERİ/PROJE işinden söz ediyorsa is-bitir. Kararsızsan anlasilmadi dön ve sor.',
+    '',
+    'DEPO HAREKETİ (stok bakiyesini DEĞİŞTİRİR — okuma değil):',
+    '- stok-giris: depoya mal girdi ("A50\'den 27 boy giriş yap", "Saray\'dan 500 boy süpürgelik geldi").',
+    '- stok-cikis: depodan mal çıktı ("B111 eloksaldan 20 boy çıkış", "Akbank işine 40 boy A50 verdik").',
+    '    stokKod = söylenen ürün kodu ya da tarifi (ÜRÜN KODLARI listesinden en yakını; emin değilsen söyleneni aynen yaz).',
+    '    stokMiktar = sayı. stokBirim = boy | adet | m | kg (söylenmediyse "boy").',
+    '    stokFirma = izofleks | tars (söylenmediyse null). metin = iş/müşteri ya da kısa not.',
+    '    DİKKAT: "kaç boy var", "ne kadar kaldı" gibi SORULAR stok hareketi DEĞİL — onlar sorgu.',
     '',
     'EKRAN VE SORGU:',
     '- ekran: sadece ekran aç ("stok aç", "iş takibe geç", "muhasebeyi göster"). hedef = gorevler|istakip|stok|muhasebe.',
@@ -1407,7 +1417,8 @@ const IT_ISLEM  = ['is-bitir','is-sil','teklif-gonderildi','teklif-red','teklif-
 const SERBEST_ISLEM = ['ekran','sorgu'];
 Object.assign(ISLEM_AD, {
   'is-bitir':'İşi bitir', 'is-sil':'İşi sil', 'teklif-gonderildi':'Gönderildi işaretle',
-  'teklif-red':'Teklifi reddet', 'teklif-kabul':'Teklifi kabul et', 'ekran':'Ekranı aç', 'sorgu':'Sorgula'
+  'teklif-red':'Teklifi reddet', 'teklif-kabul':'Teklifi kabul et', 'ekran':'Ekranı aç', 'sorgu':'Sorgula',
+  'stok-giris':'Depoya giriş', 'stok-cikis':'Depodan çıkış'
 });
 const EKRAN_AD = { gorevler:'Görevler', istakip:'İş Takip', stok:'Stok', muhasebe:'Muhasebe' };
 const EKRAN_TAB = { gorevler:'home', istakip:'istakip', stok:'stok', muhasebe:'muh' };
@@ -1445,6 +1456,7 @@ function komutSonuc(veri, ham){
     const ger = gorevCoz(o.gorevId);
     if (ger) o.gorevId = ger;
   }
+  if (STOK_ISLEM.includes(islem)){ komutStok(o, islem); return; }   /* kendi onay akışı */
   const gecerli = (islem === 'ekle' && o.isId && o.metin)
                || (islem === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
                || (HEDEF_ISLEM.includes(islem) && islem !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
@@ -1820,6 +1832,139 @@ function komutSorgu(o){
   document.getElementById('v-acts').innerHTML =
     '<button class="btn" data-act="voice-cevap">&#127908; Yeni soru</button>' +
     '<button class="btn primary" data-act="voice-close">Kapat</button>';
+}
+
+
+/* ============ FAZ 3: sesle depo hareketi (masaüstü TERM ile aynı) ============ */
+const STOK_ISLEM = ['stok-giris', 'stok-cikis'];
+let stokSecenek = null, stokBekKomut = null;
+
+/* Söylenen ürün tarifini depo kaydına eşle */
+function stokCoz(tarif, firma){
+  let L = stokListe();
+  const q = String(tarif || '').trim();
+  if (firma) L = L.filter(r => r.f === firma);
+  if (!q) return [];
+  const sik = araSik(q);
+  const tam = L.filter(r => araSik(r.k) === sik);
+  if (tam.length) return tam;
+  return L.filter(r => araUyar([r.k, r.c, r.d, r.r, r.e], q));
+}
+/* Söylenen miktarı depo birimine (boy/adet) çevir */
+function stokMiktarCevir(r, miktar, birim){
+  const m = +miktar || 0, b = String(birim || '').toLocaleLowerCase('tr');
+  if (!m) return { adet: 0, not: '' };
+  if (b === 'm' || b === 'metre' || b === 'mt'){
+    if (+r.b > 0) return { adet: Math.round((m / (+r.b)) * 100) / 100, not: m + ' m ÷ ' + r.b + ' m boy' };
+    return { adet: 0, hata: 'Bu kalemin boy uzunluğu tanımlı değil — metre adede çevrilemedi.' };
+  }
+  if (b === 'kg' || b === 'kilo'){
+    const kgBoy = (+r.kg > 0 && +r.a > 0) ? (+r.kg / +r.a) : 0;
+    if (kgBoy > 0) return { adet: Math.round((m / kgBoy) * 100) / 100, not: m + ' kg ÷ ' + kgBoy.toFixed(2) + ' kg/boy' };
+    return { adet: 0, hata: 'Bu kalemin kg değeri tanımlı değil — kilo adede çevrilemedi.' };
+  }
+  return { adet: m, not: '' };
+}
+function stokAdi(r){ return [r.c, r.r, r.e].filter(Boolean).join(' · '); }
+
+function komutStok(o, islem){
+  const yon = (islem === 'stok-cikis') ? 'Çıkış' : 'Giriş';
+  const firma = (o.stokFirma === 'tars' || o.stokFirma === 'izofleks') ? o.stokFirma : '';
+  let aday = stokCoz(o.stokKod, firma);
+  if (!aday.length && firma) aday = stokCoz(o.stokKod, '');
+  const h = { yon, firma, aday, o, islem };
+
+  if (!stokHam().length){
+    vSet('Depo listesi yok', V.metin);
+    document.getElementById('v-body').innerHTML =
+      '<p class="vq">Depo listesi henüz gelmemiş — bilgisayarda <b>TERM → Muhasebe</b> ekranını bir kez aç.</p>';
+    document.getElementById('v-acts').innerHTML = '<button class="btn primary" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  if (!aday.length){
+    stokBekKomut = null;
+    ekranKilitle();
+    vSet('Kalem bulunamadı', V.metin);
+    document.getElementById('v-body').innerHTML =
+      `<p class="vq">“${esc(String(o.stokKod || ''))}” depoda bulunamadı. Ürün kodunu söyler misin?</p>` + yazDuzeltHtml(V.metin);
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="voice-cevap">&#127908; Tekrar söyle</button>' +
+      '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  if (aday.length > 1){
+    stokSecenek = h;
+    ekranKilitle();
+    vSet('Hangi kalem?', V.metin);
+    document.getElementById('v-body').innerHTML = '<div class="vsum">'
+      + aday.slice(0, 8).map((r, i) =>
+          `<div data-act="stok-sec" data-i="${i}" style="cursor:pointer"><span>${i + 1}</span>`
+          + `<b>${esc(r.k)}</b><i>${esc([r.r, r.e].filter(Boolean).join(' · ') + ' · ' + (r.f === 'tars' ? 'TARS' : 'İZO'))}</i></div>`).join('')
+      + '</div>'
+      + (aday.length > 8 ? `<p class="vq">${aday.length - 8} kalem daha var — daha belirgin söyle.</p>` : '');
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn" data-act="voice-cevap">&#127908; Tarif et</button>' +
+      '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  stokOnayAc(h, aday[0]);
+}
+
+function stokOnayAc(h, r){
+  const c = stokMiktarCevir(r, h.o.stokMiktar, h.o.stokBirim);
+  const sonra = Math.round(((+r.a || 0) + (h.yon === 'Çıkış' ? -1 : 1) * c.adet) * 100) / 100;
+  const sat = (e, v, renk) => `<div><span>${e}</span><b${renk ? ` style="color:${renk}"` : ''}>${esc(v)}</b></div>`;
+  const govde = '<div class="vsum">'
+    + sat('İŞLEM', h.yon === 'Çıkış' ? 'DEPODAN ÇIKIŞ' : 'DEPOYA GİRİŞ', h.yon === 'Çıkış' ? '#9C3B2A' : '#2F6E52')
+    + sat('KALEM', r.k + ' — ' + stokAdi(r))
+    + sat('FİRMA', r.f === 'tars' ? 'TARS' : 'İZOFLEKS')
+    + sat('MİKTAR', (h.o.stokMiktar || 0) + ' ' + (h.o.stokBirim || 'adet') + (c.not ? `  →  ${c.adet} boy (${c.not})` : ''))
+    + sat('ŞU AN', (+r.a || 0) + ' boy' + (r.bek ? ` (bekleyen ${r.bek > 0 ? '+' : ''}${r.bek})` : ''))
+    + sat('SONRA', sonra + ' boy', sonra < 0 ? '#9C3B2A' : '')
+    + (h.o.metin ? sat('NOT', h.o.metin) : '')
+    + '</div>'
+    + (c.hata ? `<p class="vq" style="color:#9C3B2A">${esc(c.hata)}</p>` : '')
+    + (sonra < 0 ? '<p class="vq" style="color:#9C3B2A">Dikkat: bakiye eksiye düşüyor.</p>' : '')
+    + '<p class="vq">Kayıt bekleyen hareket listesine düşer; Excel\'e sonra işlenir.</p>';
+
+  ekranKilitle();
+  if (c.hata || !(c.adet > 0)){
+    stokBekKomut = null;
+    vSet(c.hata ? 'Miktar çevrilemedi' : 'Miktar anlaşılmadı', V.metin);
+    document.getElementById('v-body').innerHTML = govde;
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="voice-cevap">&#127908; Tekrar söyle</button>' +
+      '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  stokBekKomut = { h, r, adet: c.adet };
+  vSet('Onay bekliyor', V.metin);
+  document.getElementById('v-body').innerHTML = govde;
+  document.getElementById('v-acts').innerHTML =
+    `<button class="btn primary${h.yon === 'Çıkış' ? ' tehlike' : ''}" data-act="stok-kaydet">`
+    + (h.yon === 'Çıkış' ? 'Çıkışı kaydet' : 'Girişi kaydet') + '</button>'
+    + '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>'
+    + '<button class="btn ghost" data-act="voice-close">İptal</button>';
+}
+
+async function stokKaydet(){
+  const b = stokBekKomut; if (!b) return;
+  stokBekKomut = null;
+  const { r, h } = b, d = new Date();
+  const kayit = {
+    tarih: ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear(),
+    kod: r.k, firma: r.f || '', cins: r.c || '', renk: r.r || '', ebat: r.e || '', boy: (+r.b || 0),
+    yon: h.yon, adetEtki: b.adet,
+    soylenen: (+h.o.stokMiktar || 0), soylenenBirim: String(h.o.stokBirim || 'adet'),
+    is: String(h.o.metin || ''), aciklama: '',
+    islendi: false, kaynak: 'ses', cihaz: 'telefon',
+    ts: Date.now(), metin: String(V.metin || '')
+  };
+  voiceKapat();
+  const id = await S.store.add('stokHareket', kayit);
+  S.tab = 'stok'; render();
+  noteGeri(`${h.yon === 'Çıkış' ? 'Çıkış' : 'Giriş'} kaydedildi — ${r.k} ${b.adet} boy (bekleyen)`,
+           () => S.store.remove('stokHareket', id));
 }
 
 /* ============ İŞ TAKİP KAYDI — iş bitir/sil, teklif durumu ============ */
@@ -2709,9 +2854,44 @@ async function itKabulKaydet(){
 }
 
 /* ============ Stok (telefon) ============ */
-function stokListe(){
+function stokHam(){
   const d = S.stok.find(x => x.id === 'depo');
   return (d && Array.isArray(d.l)) ? d.l : [];
+}
+/* ---- FAZ 3: bekleyen depo hareketleri ----
+   Depo verisinin kaynağı bilgisayardaki Izofleks-Des-Stok.xlsx; 'stok/depo' onun anlık
+   görüntüsü. Sesle girilen hareket 'stokHareket'e bekleyen olarak düşer ve bakiyeye
+   burada eklenir. Excel'e işlenip yeni anlık görüntü gelince damga ilerler ve
+   o hareketler kendiliğinden düşer — elle işaretleme yok. */
+function stokDamga(){
+  const m = S.stok.find(x => x.id === 'meta');
+  return (m && +m.damga) ? +m.damga : 0;
+}
+function stokBekleyen(){
+  const d = stokDamga();
+  return (S.stokHareket || []).filter(h => !h.islendi && (+h.ts || 0) > d)
+    .sort((a, b) => (+b.ts || 0) - (+a.ts || 0));
+}
+function stokDelta(){
+  const d = {};
+  stokBekleyen().forEach(h => {
+    const k = h.firma + '|' + h.kod;
+    d[k] = (d[k] || 0) + ((h.yon === 'Çıkış' ? -1 : 1) * (+h.adetEtki || 0));
+  });
+  return d;
+}
+function stokListe(){
+  const d = stokDelta(), bos = !Object.keys(d).length;
+  if (bos) return stokHam();
+  return stokHam().map(r => {
+    const ek = +d[(r.f || '') + '|' + (r.k || '')] || 0;
+    if (!ek) return r;
+    const y = { ...r };
+    y.a = Math.round(((+r.a || 0) + ek) * 100) / 100;
+    if (+r.b > 0 && +r.kg > 0 && +r.a > 0) y.kg = Math.round((y.a / (+r.a)) * (+r.kg) * 10) / 10;
+    y.bek = ek;
+    return y;
+  });
 }
 function stokSuz(){
   const q = (S.stk.ara || '').trim().toLocaleLowerCase('tr');
@@ -2741,6 +2921,22 @@ function stokView(){
     + '</div>'
     + `<input class="mara" id="s-ara" type="search" placeholder="Kod, cins, renk, ebat…" value="${esc(S.stk.ara)}">`
     + '</div>';
+  /* FAZ 3: Excel'e işlenmemiş hareketler */
+  const bek = stokBekleyen();
+  if (bek.length){
+    h += `<div class="sbek"><div class="sbek-h">EXCEL'E İŞLENMEMİŞ HAREKET (${bek.length})</div>`
+      + bek.slice(0, 10).map(x => {
+          const cik = x.yon === 'Çıkış';
+          return `<div class="sbek-r"><span class="sbek-t">${esc(x.tarih || '')}</span>`
+            + `<b class="${cik ? 'cik' : 'gir'}">${cik ? 'ÇIKIŞ' : 'GİRİŞ'}</b>`
+            + `<span class="sbek-k">${esc(x.kod || '')}</span>`
+            + `<span class="sbek-m">${cik ? '−' : '+'}${(+x.adetEtki || 0)} boy</span>`
+            + `<span class="sbek-i">${esc(x.is || '')}</span>`
+            + `<button class="sbek-x" data-act="stok-bek-sil" data-id="${esc(x.id)}">&times;</button></div>`;
+        }).join('')
+      + (bek.length > 10 ? `<div class="sbek-r"><span class="sbek-i">${bek.length - 10} hareket daha…</span></div>` : '')
+      + '</div>';
+  }
   h += `<div class="mstrip">
     <div class="mkut"><span>Kalem</span><b>${L.length}</b></div>
     <div class="mkut"><span>Toplam adet</span><b>${ad.toLocaleString('tr-TR')}</b></div>
@@ -2750,7 +2946,7 @@ function stokView(){
     h += `<div class="mrow ${r.f === 'tars' ? 'gd' : 'gl'}">
       <div class="mr-1"><span class="myon ${r.f === 'tars' ? 'g' : 'l'}">${r.f === 'tars' ? 'TARS' : 'İZOFLEKS'}</span>
         <span class="mtar">${esc(r.c || '')}${r.d ? ' · ' + esc(r.d) : ''}</span>
-        <span class="mrz ${(+r.a || 0) > 0 ? 'ok' : 'ks'}">${(+r.a || 0)} ad</span></div>
+        <span class="mrz ${r.bek ? 'bk' : ((+r.a || 0) > 0 ? 'ok' : 'ks')}">${(+r.a || 0)} ad${r.bek ? ` (${r.bek > 0 ? '+' : ''}${r.bek})` : ''}</span></div>
       <div class="mr-2 mkod">${esc(r.k || '')}</div>
       <div class="mr-3"><span class="mno">${esc([r.e, r.r].filter(Boolean).join(' · '))}</span>
         <span class="mtut">${r.b ? esc(String(r.b)) + ' m' : ''}${r.kg ? `<em>${(+r.kg).toLocaleString('tr-TR',{maximumFractionDigits:1})} kg</em>` : ''}</span></div>
@@ -3408,6 +3604,17 @@ document.addEventListener('click', async (e) => {
     komutCoz(v);
     return;
   }
+  if (a === 'stok-sec'){
+    const h = stokSecenek; if (!h) return;
+    const r = h.aday[+(b.dataset.i ?? -1)];
+    if (!r) return;
+    stokSecenek = null; stokOnayAc(h, r); return;
+  }
+  if (a === 'stok-kaydet'){ stokKaydet(); return; }
+  if (a === 'stok-bek-sil'){
+    if (confirm('Bu bekleyen hareket silinsin mi?')) S.store.remove('stokHareket', id);
+    return;
+  }
   if (a === 'voice-coklu'){ komutCokluUygula(); return; }
   if (a === 'voice-close'){ voiceKapat(); return; }
   if (a === 'voice-ok'){ if (V.sonuc) komutUygula(V.sonuc, false); return; }
@@ -3604,6 +3811,7 @@ function bind(store, label, kind){
   S.unsub.push(store.subscribe('settings', rows => { S.settings = rows; loadA42(true); }));
   S.unsub.push(store.subscribe('muhasebe', rows => { S.muhasebe = rows; if (S.tab === 'muh') render(); }));
   S.unsub.push(store.subscribe('stok', rows => { S.stok = rows; if (S.tab === 'stok') render(); }));
+  S.unsub.push(store.subscribe('stokHareket', rows => { S.stokHareket = rows; if (S.tab === 'stok') render(); }));
   S.unsub.push(store.subscribe('gecmis', rows => { S.gecmis = rows; gaDugme(); gaPanelCiz(); }));
 }
 
