@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.23-term18";
+const APP_VERSION = "2026.09.23-term19";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2783,8 +2783,10 @@ function render(){
   gaDugme();
   const markaEl = document.querySelector('.topbar .brand');
   if (markaEl) markaEl.classList.toggle('tiklanir', S.tab !== 'home');
+  /* Mikrofon HER ekranda görünür — sesli komut artık görev dışında İş Takip, stok/muhasebe
+     sorgusu ve ekran geçişi de yapıyor. Önce sadece görev sekmelerinde açıktı. (Mert 23.09.2026) */
   const micBtn = document.getElementById('mic');
-  if (micBtn) micBtn.hidden = !gorevde;
+  if (micBtn) micBtn.hidden = false;
   const bas = document.getElementById('ekran-ad');
   if (bas){
     bas.textContent = S.tab === 'muh' ? 'Muhasebe'
