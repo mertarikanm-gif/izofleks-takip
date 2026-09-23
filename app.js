@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.23-faz3";
+const APP_VERSION = "2026.09.23-faz3b";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -1023,6 +1023,9 @@ function sesIpucu(){
     + 'metraj, teklif, hakediş, fatura, sipariş, montaj, keşif, tedarikçi, sabit, tarihsiz, '
     + 'stok, depo, boy, adet, kilo, giriş, çıkış, ödeme, tahsilat, borç, alacak, kdv, '
     + 'gönderildi, reddedildi, kabul, iş takip, muhasebe. '
+    + 'Renkler: naturel mat eloksal, pres, boyalı, antrasit, siyah, beyaz, gri, kuvars gri, '
+    + 'açık gri, kahve, RAL 7016, RAL 7021, RAL 9005, RAL 9016, RAL 9003, RAL 7039, RAL 7047, RAL 8019, '
+    + 'Saray eloksal kartelası: SM01 (mat 01), SM02 (mat 02), SM15 (mat 15), SP21 (parlak 21). '
     + (ad ? 'Geçebilecek adlar: ' + ad + '. ' : '')
     + (kod ? 'Ürün kodları: ' + kod + '.' : '');
 }
@@ -1726,21 +1729,35 @@ const araSade = t => String(t == null ? '' : t)
   .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ç/g,'c')
   .replace(/[^a-z0-9]+/g,' ').trim();
 const araSik = t => araSade(t).replace(/ /g,'');          /* "b111 el3" → "b111el3" */
+/* Türkçe ek aldığımız için ("süpürgelikten", "eloksaldan") PARÇA değil ÖN EK eşleşmesi;
+   sayılar (ölçü, boy, RAL) TAM eşleşir — yoksa "01" sorgusu 100*12'deki "10012"ye,
+   "6" sorgusu 60*9'a takılıyordu. (Mert 23.09.2026) */
 function araUyar(alanlar, q){
-  const metin = araSade(alanlar.join(' ')), sik = araSik(alanlar.join(' '));
-  const kel = araSade(q).split(' ').filter(Boolean);
-  if (!kel.length) return true;
-  return kel.every(k => metin.indexOf(k) >= 0 || sik.indexOf(araSik(k)) >= 0);
+  const hep = alanlar.join(' ');
+  const kelime = araSade(hep).split(' ').filter(Boolean), sik = araSik(hep);
+  const qs = araSade(q);
+  if (!qs) return true;
+  const qsik = araSik(qs);
+  if (qsik.length >= 3 && sik.indexOf(qsik) >= 0) return true;   /* "sm 01" → "sm01" */
+  return qs.split(' ').filter(Boolean).every(k => {
+    const sayi = /^[0-9]+$/.test(k);
+    for (const w of kelime){
+      if (w === k) return true;
+      if (sayi) continue;
+      if (w.indexOf(k) === 0 || (k.indexOf(w) === 0 && w.length >= 3)) return true;
+    }
+    return k.length >= 4 && sik.indexOf(k) >= 0;                  /* tireli kod parçası */
+  });
 }
 function sorguStok(q){
   const L = stokListe();
   if (!L.length) return { baslik:'Stok', bos:'Depo listesi henüz gelmemiş — bilgisayarda TERM → Muhasebe ekranını bir kez aç.' };
   const n = (q || '').trim();
-  const bul = n ? L.filter(r => araUyar([r.k, r.c, r.r, r.e, r.n, r.f], n)) : L;
+  const bul = n ? L.filter(r => araUyar(stokAlanlar(r), n)) : L;
   if (!bul.length){
     /* hiç bulunamadıysa ilk kelimeyle yakın kayıtları öner */
     const ilk = araSade(n).split(' ')[0] || '';
-    const yakin = ilk ? L.filter(r => araUyar([r.k, r.c, r.r, r.e, r.n], ilk)).slice(0, 8) : [];
+    const yakin = ilk ? L.filter(r => araUyar(stokAlanlar(r), ilk)).slice(0, 8) : [];
     if (yakin.length) return {
       baslik: 'Stok · “' + q + '” bulunamadı',
       ust: [['Benzer ' + yakin.length + ' kayıt']],
@@ -1835,6 +1852,47 @@ function komutSorgu(o){
 }
 
 
+
+/* ===== DEPO ARAMASI — KONUŞMA DİLİ ↔ KOD KARŞILIKLARI (masaüstü TERM ile aynı) =====
+   Kalemin kendi metni (kod/cins/detay/renk/ebat) zaten aranıyor; "eloksal", "pres",
+   "ral 9016", "süpürgelik" kendiliğinden eşleşir. Bu tablo SADECE o metinde geçmeyen
+   söylenişleri ekler: renk adları, Saray eloksal kartelası, ölçü/boy söylenişleri.
+   Kod yapısı: <aile>-<profil>-<renk>-<boy>  (B11 renkte R öneki kullanır, B12 kullanmaz)
+   Yeni kelime gerekirse sadece buraya ekle. (Mert 23.09.2026) */
+const STOK_RENK_ES = {
+  SM01:'eloksal saray kartela mat 01 mat01',
+  SM02:'eloksal saray kartela mat 02 mat02',
+  SM15:'eloksal saray kartela mat 15 mat15',
+  SP21:'eloksal saray kartela parlak 21 parlak21',
+  '7016':'antrasit antrasit gri koyu gri',
+  '7021':'antrasit siyah gri koyu gri',
+  '7039':'kuvars gri gri',
+  '7047':'acik gri gri',
+  '8019':'kahve kahverengi gri kahve',
+  '9003':'beyaz sinyal beyazi',
+  '9005':'siyah jet siyah',
+  '9016':'beyaz trafik beyazi',
+  EL:'eloksal naturel mat', PR:'pres presli', BO:'boyali boya', PL:'plastik'
+};
+function stokEkKelime(kod, renk, boy, ebat){
+  const ek = [], K = String(kod || '').toUpperCase(), p = K.split('-');
+  const seg = (p.length >= 3) ? p[p.length - 2] : '';
+  const ral = seg.replace(/^R/, '');
+  if (STOK_RENK_ES[seg]) ek.push(STOK_RENK_ES[seg]);
+  if (ral !== seg && STOK_RENK_ES[ral]) ek.push(STOK_RENK_ES[ral]);
+  if (/^R?\d{4}$/.test(seg)) ek.push('ral' + ral, 'ral ' + ral);
+  const m = String(renk || '').match(/(\d{4})/);
+  if (m){ if (STOK_RENK_ES[m[1]]) ek.push(STOK_RENK_ES[m[1]]); ek.push('ral' + m[1]); }
+  if (+boy > 0) ek.push(boy + 'm', boy + ' metre', boy + 'lik', boy + ' metrelik');
+  const g = String(ebat || '').split('*')[0];
+  if (g) ek.push(g + 'lik');
+  return ek.join(' ');
+}
+/* telefondaki satır alanları: k=kod c=cins d=detay r=renk e=ebat b=boy n=not f=firma */
+function stokAlanlar(x){
+  return [x.k, x.c, x.d, x.r, x.e, x.n, x.f, stokEkKelime(x.k, x.r, x.b, x.e)];
+}
+
 /* ============ FAZ 3: sesle depo hareketi (masaüstü TERM ile aynı) ============ */
 const STOK_ISLEM = ['stok-giris', 'stok-cikis'];
 let stokSecenek = null, stokBekKomut = null;
@@ -1848,7 +1906,7 @@ function stokCoz(tarif, firma){
   const sik = araSik(q);
   const tam = L.filter(r => araSik(r.k) === sik);
   if (tam.length) return tam;
-  return L.filter(r => araUyar([r.k, r.c, r.d, r.r, r.e], q));
+  return L.filter(r => araUyar(stokAlanlar(r), q));
 }
 /* Söylenen miktarı depo birimine (boy/adet) çevir */
 function stokMiktarCevir(r, miktar, birim){
@@ -2894,13 +2952,10 @@ function stokListe(){
   });
 }
 function stokSuz(){
-  const q = (S.stk.ara || '').trim().toLocaleLowerCase('tr');
+  const q = (S.stk.ara || '').trim();
   return stokListe().filter(r => {
     if (S.stk.firma && r.f !== S.stk.firma) return false;
-    if (q){
-      const h = [r.k, r.c, r.d, r.e, r.r].join(' ').toLocaleLowerCase('tr');
-      if (h.indexOf(q) < 0) return false;
-    }
+    if (q && !araUyar(stokAlanlar(r), q)) return false;   /* sesli komutla aynı eşleştirme */
     return true;
   });
 }
