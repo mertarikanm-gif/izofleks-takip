@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.22-term17";
+const APP_VERSION = "2026.09.23-term18";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -1011,10 +1011,20 @@ function sesIpucu(){
   aiIsListesi().forEach(x => { ekle(x.m); ekle(x.p); });
   let ad = '';
   for (const a of adlar){ if ((ad + a).length > 700) break; ad += (ad ? ', ' : '') + a; }
+  /* depodaki ürün kodları — "A50", "B11-F3", "9584" gibi kodlar doğru yazılsın */
+  let kod = '';
+  try {
+    const gor = [];
+    stokListe().forEach(r => { const k = String(r.k || '').trim(); if (k && gor.indexOf(k) < 0) gor.push(k); });
+    for (const k of gor){ if (kod.length > 260) break; kod += (kod ? ', ' : '') + k; }
+  } catch(e){}
   return 'Bir alüminyum doğrama firmasının iş takip uygulamasına verilen Türkçe sesli komut. '
     + 'Terimler: İzofleks, TARS, A42 cam bölme, süpürgelik, kapı kasası, kanat, profil, eloksal, RAL, '
-    + 'metraj, teklif, hakediş, fatura, sipariş, montaj, keşif, tedarikçi, sabit, tarihsiz. '
-    + (ad ? 'Geçebilecek adlar: ' + ad + '.' : '');
+    + 'metraj, teklif, hakediş, fatura, sipariş, montaj, keşif, tedarikçi, sabit, tarihsiz, '
+    + 'stok, depo, boy, adet, kilo, giriş, çıkış, ödeme, tahsilat, borç, alacak, kdv, '
+    + 'gönderildi, reddedildi, kabul, iş takip, muhasebe. '
+    + (ad ? 'Geçebilecek adlar: ' + ad + '. ' : '')
+    + (kod ? 'Ürün kodları: ' + kod + '.' : '');
 }
 
 async function kayitBaslat(){
@@ -1268,6 +1278,7 @@ async function komutCoz(metin){
   const bugun = new Date();
   const isler = aiIsListesi();
   const gorevler = aiGorevListesi();
+  const itL = aiItListesi();
   const sistem = [
     'Bir Türk alüminyum doğrama firmasının iş takip uygulaması için sesli komutları JSON\'a çeviriyorsun.',
     '',
@@ -1284,15 +1295,21 @@ async function komutCoz(metin){
     'İŞ LİSTESİ (isId | müşteri | proje):',
     isler.map(x => x.id + ' | ' + x.m + ' | ' + x.p).join('\n'),
     '',
+    'İŞ TAKİP KAYITLARI — is-bitir / is-sil / teklif-* işlemlerinde isId olarak SADECE buradaki kimlikleri kullan:',
+    (itL.isl.length ? 'DEVAM EDEN İŞLER:\n' + itL.isl.join('\n') : 'DEVAM EDEN İŞ YOK'),
+    (itL.tkf.length ? 'TEKLİFLER:\n' + itL.tkf.join('\n') : 'AÇIK TEKLİF YOK'),
+    '',
     'MEVCUT GÖREVLER (gorevId | gün | iş | metin) — gorevId olarak SADECE bu kısa kodları (G1, G2…) kullan:',
     (gorevler.length ? gorevler.join('\n') : '(görev yok)'),
     '',
     'SADECE geçerli JSON döndür — açıklama, başlık, kod çiti (```) YAZMA. JSON\u2019dan sonra tek karakter bile olmasın.',
     'Kullanıcı tek cümlede BİRDEN FAZLA iş söylerse ( “şunu ve şunu” ) JSON DİZİSİ döndür: [{…},{…}]. Tek iş varsa tek nesne.',
     'Şema:',
-    '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"is-degistir"|"anlasilmadi",',
+    '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"is-degistir"',
+    '        |"is-bitir"|"is-sil"|"teklif-gonderildi"|"teklif-red"|"teklif-kabul"|"ekran"|"sorgu"|"anlasilmadi",',
     ' "isId":string|null,"gorevId":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,',
-    ' "metin":string|null,"guven":0..1,"soru":string|null}',
+    ' "metin":string|null,"hedef":string|null,"konu":string|null,"arama":string|null,"sebep":string|null,',
+    ' "guven":0..1,"soru":string|null}',
     '',
     'İŞLEMLER:',
     '- ekle: yeni görev. isId + metin zorunlu, gun/sabit isteğe bağlı.',
@@ -1310,6 +1327,25 @@ async function komutCoz(metin){
     '    "şunu da ekle / notunu ekle" → eski metni aynen koru, sonuna ", <yeni>" ekleyip tam metni yaz.',
     '    "şunu çıkar" → o kısmı ayıklayıp kalan tam metni yaz.',
     '- is-degistir: var olan görevi BAŞKA bir işe/başlığa taşı (“şunu tedarikçiye al”, “bunu muhasebeye taşı”, “mimarın işine bağla”). gorevId + isId zorunlu; gün değişmez.',
+    '',
+    'İŞ TAKİP İŞLEMLERİ (görev değil — gerçek iş/teklif kaydı; isId "a42:" ya da "tkf:" ile başlar):',
+    '- is-bitir: devam eden bir İŞİ bitmiş yap ("Akbank işini bitir", "Hersek tamamlandı", "şu işi kapat"). isId "a42:..." olmalı.',
+    '- is-sil: işi listeden kaldır ("şu işi sil/iptal et"). isId "a42:..." olmalı.',
+    '- teklif-gonderildi: teklifi gönderildi işaretle ("Hyatt teklifini gönderdim"). isId "tkf:..." olmalı.',
+    '- teklif-red: teklif reddedildi ("… teklifi olmadı / reddedildi / rakibe gitti / pahalı buldu").',
+    '    isId "tkf:...", sebep = FIYAT | RAKIP | SURE | KAPSAM | IPTAL | CEVAPSIZ | DIGER. Sebep söylenmediyse DIGER.',
+    '    Söylenen ek açıklama varsa metin alanına yaz.',
+    '- teklif-kabul: teklif kabul edildi / iş çıktı. isId "tkf:...". Tutar formunu AÇAR, tutarı sen yazmazsın.',
+    'DİKKAT: "görevi bitir" ile "işi bitir" AYRI şeylerdir. Kullanıcı bir GÖREV metnini işaret ediyorsa bitti,',
+    'bir MÜŞTERİ/PROJE işinden söz ediyorsa is-bitir. Kararsızsan anlasilmadi dön ve sor.',
+    '',
+    'EKRAN VE SORGU:',
+    '- ekran: sadece ekran aç ("stok aç", "iş takibe geç", "muhasebeyi göster"). hedef = gorevler|istakip|stok|muhasebe.',
+    '- sorgu: bilgi sorusu, hiçbir şey değiştirmez ("A50 profilden kaç boy var", "Turancam\'a borcum ne kadar",',
+    '    "Akbank işi ne durumda", "bekleyen teklifler neler").',
+    '    konu = stok | muhasebe | istakip.  arama = aranacak kelime (ürün kodu, firma, müşteri, proje). Yoksa null.',
+    '    Soru cümlesi ("kaç", "ne kadar", "var mı", "ne durumda", "listele", "göster") varsa ve kayıt değiştirmiyorsa DAİMA sorgu seç.',
+    '',
     '- anlasilmadi: emin değilsen. soru alanını doldur.',
     '',
     'KARMAŞIK CÜMLELER:',
@@ -1366,6 +1402,36 @@ const ISLEM_AD = { ekle:'Ekle', tasi:'Taşı', sil:'Sil', bitti:'Bitti işaretle
   'geri-al':'Geri aç', sabitle:'Sabitle', 'sabit-kaldir':'Sabitten çıkar', duzenle:'Değiştir',
   'is-degistir':'İşi değiştir' };
 const HEDEF_ISLEM = ['tasi','sil','bitti','geri-al','sabitle','sabit-kaldir','duzenle','is-degistir'];
+/* İş Takip (gerçek iş/teklif kaydı) + ekran + sorgu — görev listesinden bağımsız işlemler */
+const IT_ISLEM  = ['is-bitir','is-sil','teklif-gonderildi','teklif-red','teklif-kabul'];
+const SERBEST_ISLEM = ['ekran','sorgu'];
+Object.assign(ISLEM_AD, {
+  'is-bitir':'İşi bitir', 'is-sil':'İşi sil', 'teklif-gonderildi':'Gönderildi işaretle',
+  'teklif-red':'Teklifi reddet', 'teklif-kabul':'Teklifi kabul et', 'ekran':'Ekranı aç', 'sorgu':'Sorgula'
+});
+const EKRAN_AD = { gorevler:'Görevler', istakip:'İş Takip', stok:'Stok', muhasebe:'Muhasebe' };
+const EKRAN_TAB = { gorevler:'home', istakip:'istakip', stok:'stok', muhasebe:'muh' };
+const SORGU_AD  = { stok:'Stok', muhasebe:'Muhasebe', istakip:'İş Takip' };
+/* isId → a42 iş / teklif kaydı.
+   HAM listede ararız: a42Devam() sadece DEVAM'ı, a42Teklif() sadece GONDERILDI/KABUL'ü
+   döndürüyor → "teklifi gönderildi yap" gibi komutlar hedefini bulamıyordu. */
+const itIsBul  = id => (S.a42.isler || []).find(z => 'a42:' + z.is_id === String(id || ''));
+const itTkfBul = id => (S.a42.teklifler || []).find(z => 'tkf:' + z.id === String(id || ''));
+/* Sesli komutun hedefleyebileceği İş Takip kayıtları (kapanmışlar hariç) */
+function aiItListesi(){
+  const kapali = ['SILINDI','RED','IPTAL'];
+  const isl = (S.a42.isler || [])
+    .filter(x => kapali.indexOf(String(x.durum || 'DEVAM').toUpperCase()) < 0)
+    .slice(0, 30)
+    .map(x => 'a42:' + x.is_id + ' | ' + [x.musteri, x.proje].filter(Boolean).join(' — ')
+              + ' | durum: ' + String(x.durum || 'DEVAM'));
+  const tkf = (S.a42.teklifler || [])
+    .filter(x => kapali.indexOf(String(x.durum || '').toUpperCase()) < 0 && !String(x.is_id || '').trim())
+    .slice(0, 30)
+    .map(x => 'tkf:' + x.id + ' | ' + [x.musteri, x.proje].filter(Boolean).join(' — ')
+              + ' | durum: ' + String(x.durum || 'BEKLİYOR'));
+  return { isl, tkf };
+}
 
 function komutSonuc(veri, ham){
   ekranBilet++;
@@ -1381,7 +1447,11 @@ function komutSonuc(veri, ham){
   }
   const gecerli = (islem === 'ekle' && o.isId && o.metin)
                || (islem === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
-               || (HEDEF_ISLEM.includes(islem) && islem !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
+               || (HEDEF_ISLEM.includes(islem) && islem !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
+               || (islem === 'sorgu' && SORGU_AD[o.konu])
+               || (islem === 'ekran' && EKRAN_TAB[o.hedef])
+               || ((islem === 'is-bitir' || islem === 'is-sil') && itIsBul(o.isId))
+               || (islem.startsWith('teklif-') && itTkfBul(o.isId));
   if (!gecerli){
     const soru = o.soru || 'Hangi iş için, hangi güne?';
     vSet('Soru', ham);
@@ -1394,19 +1464,25 @@ function komutSonuc(veri, ham){
     soruSor();
     return;
   }
+  /* Sorgu ve ekran açma hiçbir kaydı değiştirmez → onay sorulmaz */
+  if (SERBEST_ISLEM.includes(islem)){ komutUygula(o, true); return; }
   const guven = +o.guven || 0;
   /* Silme ve metin değiştirme asla kendiliğinden yapılmaz — her zaman onay ister
      (üzerine yazılan metin geri gelmez). */
-  const esik = (islem === 'sil' || islem === 'duzenle') ? 2 : (islem === 'ekle' ? 0.75 : 0.8);
+  const esik = (islem === 'sil' || islem === 'duzenle' || IT_ISLEM.includes(islem)) ? 2
+             : (islem === 'ekle' ? 0.75 : 0.8);
   if (guven >= esik){ komutUygula(o, true); return; }
   const soru = o.soru || (islem === 'sil' ? 'Bu görev silinsin mi?'
     : islem === 'duzenle' ? 'Bu görevin metni değiştirilsin mi? (Yeni görev eklemek istiyorsan “Yeni görev olarak ekle”ye bas.)'
+    : islem === 'is-sil' ? 'Bu İŞ kaydı silinsin mi? (görev değil, gerçek iş)'
+    : islem === 'is-bitir' ? 'Bu İŞ bitmiş olarak kapatılsın mı?'
+    : IT_ISLEM.includes(islem) ? 'Teklif kaydı güncellensin mi?'
     : 'Doğru mu?');
   ekranKilitle();
   vSet('Onay bekliyor', ham);
   document.getElementById('v-body').innerHTML = komutOzet(o) + `<p class="vq">${esc(soru)}</p>`;
   document.getElementById('v-acts').innerHTML =
-    `<button class="btn primary${islem === 'sil' ? ' tehlike' : ''}" data-act="voice-ok">${esc(ISLEM_AD[islem] || 'Uygula')}</button>` +
+    `<button class="btn primary${(islem === 'sil' || islem === 'is-sil') ? ' tehlike' : ''}" data-act="voice-ok">${esc(ISLEM_AD[islem] || 'Uygula')}</button>` +
     (islem === 'duzenle' ? '<button class="btn" data-act="voice-yeni">Yeni görev olarak ekle</button>' : '') +
     '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
     '<button class="btn ghost" data-act="voice-close">İptal</button>';
@@ -1420,7 +1496,9 @@ function komutCoklu(dizi, ham){
     if (HEDEF_ISLEM.includes(i)){ const g = gorevCoz(o.gorevId); if (g) o.gorevId = g; }
     return (i === 'ekle' && o.isId && o.metin)
         || (i === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
-        || (HEDEF_ISLEM.includes(i) && i !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId));
+        || (HEDEF_ISLEM.includes(i) && i !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
+        || ((i === 'is-bitir' || i === 'is-sil') && itIsBul(o.isId))
+        || (i.startsWith('teklif-') && itTkfBul(o.isId));
   };
   const iyi = dizi.filter(gecerliMi);
   if (!iyi.length){ komutSonuc(dizi[0] || {}, ham); return; }
@@ -1509,6 +1587,23 @@ function gunEtiket(gun, sabit){
 function komutOzet(o){
   const islem = String(o.islem || '');
   const sat = (e, v) => `<div><span>${e}</span><b>${esc(v)}</b></div>`;
+  if (IT_ISLEM.includes(islem)){
+    const x = (islem === 'is-bitir' || islem === 'is-sil') ? itIsBul(o.isId) : itTkfBul(o.isId);
+    if (!x) return '';
+    const ad = [x.musteri, x.proje].filter(Boolean).join(' · ');
+    let h = `<div class="vsum">${sat('İşlem', ISLEM_AD[islem] || islem)}${sat('Kayıt', ad)}`;
+    if (islem === 'is-bitir') h += sat('Sonuç', 'iş BİTTİ olur, bitiş tarihi bugün');
+    if (islem === 'is-sil')   h += sat('Uyarı', 'iş listeden kaldırılır (durum: SİLİNDİ)');
+    if (islem === 'teklif-gonderildi') h += sat('Yeni durum', 'GÖNDERİLDİ');
+    if (islem === 'teklif-red'){
+      const sb = (IT_RED_SEBEP.find(z => z[0] === String(o.sebep || 'DIGER')) || ['DIGER','Diğer'])[1];
+      h += sat('Sebep', sb) + (o.metin ? sat('Not', o.metin) : '');
+    }
+    if (islem === 'teklif-kabul') h += sat('Sonuç', 'tutar formu açılır — meblağı sen yazarsın');
+    return h + '</div>';
+  }
+  if (islem === 'ekran') return `<div class="vsum">${sat('Ekran', EKRAN_AD[o.hedef] || o.hedef)}</div>`;
+  if (islem === 'sorgu') return `<div class="vsum">${sat('Sorgu', SORGU_AD[o.konu] || o.konu)}${o.arama ? sat('Aranan', o.arama) : ''}</div>`;
   if (islem === 'ekle'){
     return `<div class="vsum">${sat('İş', komutIsAdi(o))}${sat('Gün', gunEtiket(o.gun, o.sabit))}${sat('Not', o.metin || '')}</div>`;
   }
@@ -1581,6 +1676,9 @@ async function komutIsCoz(o){
 
 async function komutUygula(o, otomatik, sessiz){
   const islem = String(o.islem || 'ekle');
+  if (islem === 'ekran')  return komutEkran(o);
+  if (islem === 'sorgu')  return komutSorgu(o);
+  if (IT_ISLEM.includes(islem)) return komutItUygula(o, islem);
   if (islem !== 'ekle') return komutHedefUygula(o, islem, sessiz);
   const jobId = await komutIsCoz(o);
   if (!jobId){ vSet('İş bulunamadı', V.metin); return; }
@@ -1592,6 +1690,146 @@ async function komutUygula(o, otomatik, sessiz){
   noteGeri('Eklendi — ' + komutIsAdi(o) + ' · ' + gunEtiket(o.gun, sabit),
            () => S.store.remove('tasks', gorevId));
   render();
+}
+
+/* ============ EKRAN AÇMA ============ */
+function komutEkran(o){
+  const tab = EKRAN_TAB[o.hedef];
+  if (!tab){ vSet('Ekran anlaşılmadı', V.metin); return; }
+  voiceKapat();
+  if (tab === 'home') anaEkrana(); else { S.tab = tab; S.composer = null; render(); }
+  note(EKRAN_AD[o.hedef] + ' açıldı.');
+}
+
+/* ============ SORGU — hiçbir kaydı değiştirmez, sadece okur ============ */
+function sorguStok(q){
+  const L = stokListe();
+  if (!L.length) return { baslik:'Stok', bos:'Depo listesi henüz gelmemiş — bilgisayarda TERM → Muhasebe ekranını bir kez aç.' };
+  const n = (q || '').toLocaleLowerCase('tr').trim();
+  const bul = n ? L.filter(r => [r.k, r.c, r.r, r.e, r.n].join(' ').toLocaleLowerCase('tr').indexOf(n) >= 0) : L;
+  if (!bul.length) return { baslik:'Stok', bos:'“' + q + '” için depoda kayıt yok.' };
+  const ad = bul.reduce((t, r) => t + (+r.a || 0), 0);
+  const kg = bul.reduce((t, r) => t + (+r.kg || 0), 0);
+  return {
+    baslik: 'Stok' + (q ? ' · ' + q : ''),
+    ust: [[bul.length + ' kalem', ad.toLocaleString('tr-TR') + ' adet',
+           kg.toLocaleString('tr-TR', { maximumFractionDigits:1 }) + ' kg']],
+    satir: bul.slice(0, 12).map(r => [
+      (r.k || '—'),
+      [r.c, r.r, r.e].filter(Boolean).join(' · '),
+      (+r.a || 0) + ' ad' + (r.kg ? ' · ' + (+r.kg).toLocaleString('tr-TR', { maximumFractionDigits:1 }) + ' kg' : '')
+        + ' · ' + (r.f === 'tars' ? 'TARS' : 'İZOFLEKS')
+    ]),
+    fazla: Math.max(0, bul.length - 12)
+  };
+}
+
+function sorguMuhasebe(q){
+  const L = muhListe();
+  if (!L.length) return { baslik:'Muhasebe', bos:'Fatura listesi henüz gelmemiş — bilgisayarda TERM → Muhasebe ekranını bir kez aç.' };
+  const n = (q || '').toLocaleLowerCase('tr').trim();
+  const bul = n ? L.filter(r => [r.k, r.n, r.pr].join(' ').toLocaleLowerCase('tr').indexOf(n) >= 0) : L;
+  if (!bul.length) return { baslik:'Muhasebe', bos:'“' + q + '” için fatura kaydı yok.' };
+  const tut = r => (r.p && r.p !== 'TL') ? (r.tl != null ? +r.tl : 0) : (+r.v || 0);
+  let gelen = 0, giden = 0, acikG = 0, acikL = 0;
+  bul.forEach(r => {
+    const v = tut(r);
+    if (r.y === 'G'){ giden += v; if (!r.d) acikG += v; }
+    else { gelen += v; if (!r.d) acikL += v; }
+  });
+  const tl = v => v.toLocaleString('tr-TR', { maximumFractionDigits:0 }) + ' ₺';
+  return {
+    baslik: 'Muhasebe' + (q ? ' · ' + q : ''),
+    ust: [[bul.length + ' fatura', 'Giden ' + tl(giden), 'Gelen ' + tl(gelen)]],
+    satir: [
+      ['Ödenmemiş giden', 'bizim borcumuz', tl(acikG)],
+      ['Ödenmemiş gelen', 'bizden alacak', tl(acikL)]
+    ].concat(bul.slice(0, 8).map(r => [
+      (r.k || '—'),
+      (r.y === 'G' ? 'GİDEN' : 'GELEN') + (r.n ? ' · ' + r.n : ''),
+      tl(tut(r)) + (r.d ? ' · ödendi' : ' · açık')
+    ])),
+    fazla: Math.max(0, bul.length - 8)
+  };
+}
+
+function sorguIstakip(q){
+  const n = (q || '').toLocaleLowerCase('tr').trim();
+  const uy = x => !n || [x.musteri, x.proje].join(' ').toLocaleLowerCase('tr').indexOf(n) >= 0;
+  const isl = a42Devam().filter(uy), tkf = a42Teklif().filter(uy);
+  if (!isl.length && !tkf.length){
+    return { baslik:'İş Takip', bos: n ? ('“' + q + '” için açık iş ya da teklif yok.') : 'Açık iş ya da bekleyen teklif yok.' };
+  }
+  return {
+    baslik: 'İş Takip' + (q ? ' · ' + q : ''),
+    ust: [[isl.length + ' devam eden iş', tkf.length + ' bekleyen teklif']],
+    satir: isl.slice(0, 6).map(x => ['İŞ', [x.musteri, x.proje].filter(Boolean).join(' · '), String(x.durum || 'DEVAM')])
+      .concat(tkf.slice(0, 6).map(x => ['TEKLİF', [x.musteri, x.proje].filter(Boolean).join(' · '), String(x.durum || 'BEKLİYOR')])),
+    fazla: Math.max(0, (isl.length - 6)) + Math.max(0, (tkf.length - 6))
+  };
+}
+
+function komutSorgu(o){
+  const konu = String(o.konu || '');
+  const c = konu === 'stok' ? sorguStok(o.arama)
+          : konu === 'muhasebe' ? sorguMuhasebe(o.arama)
+          : konu === 'istakip' ? sorguIstakip(o.arama) : null;
+  if (!c){ vSet('Sorgu anlaşılmadı', V.metin); return; }
+  ekranKilitle();
+  vSet(c.baslik, V.metin);
+  const govde = document.getElementById('v-body');
+  if (c.bos){
+    govde.innerHTML = `<p class="vq">${esc(c.bos)}</p>`;
+  } else {
+    govde.innerHTML = '<div class="vsum">'
+      + (c.ust || []).map(u => `<div><span>${esc(u[0])}</span><b>${esc(u.slice(1).join('  ·  '))}</b></div>`).join('')
+      + (c.satir || []).map(r => `<div><span>${esc(r[0])}</span><b>${esc(r[1])}</b><i>${esc(r[2] || '')}</i></div>`).join('')
+      + (c.fazla ? `<div><span>…</span><b>${c.fazla} kayıt daha</b></div>` : '')
+      + '</div>';
+  }
+  document.getElementById('v-acts').innerHTML =
+    '<button class="btn" data-act="voice-cevap">&#127908; Yeni soru</button>' +
+    '<button class="btn primary" data-act="voice-close">Kapat</button>';
+}
+
+/* ============ İŞ TAKİP KAYDI — iş bitir/sil, teklif durumu ============ */
+async function komutItUygula(o, islem){
+  if (islem === 'is-bitir' || islem === 'is-sil'){
+    const x = itIsBul(o.isId);
+    if (!x){ vSet('İş bulunamadı', V.metin); return; }
+    voiceKapat();
+    S.tab = 'istakip'; render();
+    /* itBitir/itSil kendi ayrıntılı onayını da gösterir (gerçekleşen maliyet / kâr) */
+    if (islem === 'is-bitir') await itBitir(x.is_id); else await itSil(x.is_id);
+    return;
+  }
+  const t = itTkfBul(o.isId);
+  if (!t){ vSet('Teklif bulunamadı', V.metin); return; }
+  const ad = [t.musteri, t.proje].filter(Boolean).join(' · ');
+  if (islem === 'teklif-gonderildi'){
+    voiceKapat(); S.tab = 'istakip'; render();
+    await itTeklifDurum(t.id, 'GONDERILDI', 'Gönderildi — ' + ad);
+    return;
+  }
+  if (islem === 'teklif-red'){
+    const sebep = (IT_RED_SEBEP.some(z => z[0] === String(o.sebep || '')) ? String(o.sebep) : 'DIGER');
+    voiceKapat(); S.tab = 'istakip'; render();
+    await itKilit('tk:' + t.id, async () => {
+      await a42Yaz({ fn:'teklif', id:t.id, durum:'RED', red_sebep:sebep, red_not:(o.metin || '') });
+      await itSonra('Reddedildi — ' + ad);
+    });
+    return;
+  }
+  if (islem === 'teklif-kabul'){
+    /* Para söz konusu: tutarı sesle yazmıyoruz — mevcut kabul formunu açıyoruz */
+    voiceKapat();
+    S.tab = 'istakip';
+    S.itSec = String(t.id);
+    S.itOv = { tip:'kabul', id:String(t.id), para:'TL', tutar:'' };
+    render();
+    note('Kabul formu açıldı — tutarı gir ve kaydet.');
+    return;
+  }
 }
 
 /* Var olan bir görev üzerinde işlem: taşı / sil / bitti / geri-al / sabitle / düzenle */
