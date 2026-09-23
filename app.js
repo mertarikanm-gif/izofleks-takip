@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.23-term19";
+const APP_VERSION = "2026.09.23-term20";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -1702,12 +1702,42 @@ function komutEkran(o){
 }
 
 /* ============ SORGU — hiçbir kaydı değiştirmez, sadece okur ============ */
+/* ARAMA EŞLEŞTİRME (Mert 23.09.2026)
+   Eskiden tek parça alt-dizi araması vardı: "b111 eloksal" yazınca, satır metninde
+   "B111-EL3 … Eloksal" gibi araya başka kelime girdiği için BULAMIYORDU.
+   Artık: Türkçe harfler sadeleşir (ı→i, ş→s…), noktalama silinir, sorgu KELİMELERE
+   bölünür ve HER kelimenin satırda geçmesi aranır (sıra önemsiz).
+   Ayrıca kodlar için boşluk/tire/nokta atılmış hâli de denenir: "b111 el3" ↔ "B111-EL3". */
+const araSade = t => String(t == null ? '' : t)
+  .toLocaleLowerCase('tr')
+  .replace(/ı/g,'i').replace(/ş/g,'s').replace(/ğ/g,'g')
+  .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ç/g,'c')
+  .replace(/[^a-z0-9]+/g,' ').trim();
+const araSik = t => araSade(t).replace(/ /g,'');          /* "b111 el3" → "b111el3" */
+function araUyar(alanlar, q){
+  const metin = araSade(alanlar.join(' ')), sik = araSik(alanlar.join(' '));
+  const kel = araSade(q).split(' ').filter(Boolean);
+  if (!kel.length) return true;
+  return kel.every(k => metin.indexOf(k) >= 0 || sik.indexOf(araSik(k)) >= 0);
+}
 function sorguStok(q){
   const L = stokListe();
   if (!L.length) return { baslik:'Stok', bos:'Depo listesi henüz gelmemiş — bilgisayarda TERM → Muhasebe ekranını bir kez aç.' };
-  const n = (q || '').toLocaleLowerCase('tr').trim();
-  const bul = n ? L.filter(r => [r.k, r.c, r.r, r.e, r.n].join(' ').toLocaleLowerCase('tr').indexOf(n) >= 0) : L;
-  if (!bul.length) return { baslik:'Stok', bos:'“' + q + '” için depoda kayıt yok.' };
+  const n = (q || '').trim();
+  const bul = n ? L.filter(r => araUyar([r.k, r.c, r.r, r.e, r.n, r.f], n)) : L;
+  if (!bul.length){
+    /* hiç bulunamadıysa ilk kelimeyle yakın kayıtları öner */
+    const ilk = araSade(n).split(' ')[0] || '';
+    const yakin = ilk ? L.filter(r => araUyar([r.k, r.c, r.r, r.e, r.n], ilk)).slice(0, 8) : [];
+    if (yakin.length) return {
+      baslik: 'Stok · “' + q + '” bulunamadı',
+      ust: [['Benzer ' + yakin.length + ' kayıt']],
+      satir: yakin.map(r => [(r.k || '—'), [r.c, r.r, r.e].filter(Boolean).join(' · '),
+        (+r.a || 0) + ' ad' + (r.kg ? ' · ' + (+r.kg).toLocaleString('tr-TR',{maximumFractionDigits:1}) + ' kg' : '')]),
+      fazla: 0
+    };
+    return { baslik:'Stok', bos:'“' + q + '” için depoda kayıt yok.' };
+  }
   const ad = bul.reduce((t, r) => t + (+r.a || 0), 0);
   const kg = bul.reduce((t, r) => t + (+r.kg || 0), 0);
   return {
@@ -1727,8 +1757,8 @@ function sorguStok(q){
 function sorguMuhasebe(q){
   const L = muhListe();
   if (!L.length) return { baslik:'Muhasebe', bos:'Fatura listesi henüz gelmemiş — bilgisayarda TERM → Muhasebe ekranını bir kez aç.' };
-  const n = (q || '').toLocaleLowerCase('tr').trim();
-  const bul = n ? L.filter(r => [r.k, r.n, r.pr].join(' ').toLocaleLowerCase('tr').indexOf(n) >= 0) : L;
+  const n = (q || '').trim();
+  const bul = n ? L.filter(r => araUyar([r.k, r.n, r.pr], n)) : L;
   if (!bul.length) return { baslik:'Muhasebe', bos:'“' + q + '” için fatura kaydı yok.' };
   const tut = r => (r.p && r.p !== 'TL') ? (r.tl != null ? +r.tl : 0) : (+r.v || 0);
   let gelen = 0, giden = 0, acikG = 0, acikL = 0;
@@ -1754,8 +1784,8 @@ function sorguMuhasebe(q){
 }
 
 function sorguIstakip(q){
-  const n = (q || '').toLocaleLowerCase('tr').trim();
-  const uy = x => !n || [x.musteri, x.proje].join(' ').toLocaleLowerCase('tr').indexOf(n) >= 0;
+  const n = (q || '').trim();
+  const uy = x => !n || araUyar([x.musteri, x.proje], n);
   const isl = a42Devam().filter(uy), tkf = a42Teklif().filter(uy);
   if (!isl.length && !tkf.length){
     return { baslik:'İş Takip', bos: n ? ('“' + q + '” için açık iş ya da teklif yok.') : 'Açık iş ya da bekleyen teklif yok.' };
