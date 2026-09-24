@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-konumcoz";
+const APP_VERSION = "2026.09.24-bulutonay";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -40,7 +40,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp
 
 /* ============ depo: yerel ============ */
 /* 'fotoTam' bilerek ABONE OLUNMAZ — tam boyut fotoğraflar sadece bakarken tek belge çekilir */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'foto', 'fotoTam', 'konum', 'gecmis'];
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'foto', 'fotoTam', 'konum', 'odemeOnay', 'gecmis'];
 
 function localStore(){
   let data = {};
@@ -92,6 +92,8 @@ const S = {
   jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], foto: [], gecmis: [],
   fotoOv: null,        // açık fotoğraf penceresi: { hedef, baslik, etiket, not, bekle, goster, tam }
   konum: [], konumOv: null,   // şantiye konumları + açık konum penceresi
+  odemeOnay: [],       // elle 'ödendi' işaretleri (masaüstü ile ortak)
+  odemeOv: null,       // açık ödeme işaretleme penceresi: { no, r }
   malOv: null,         // açık maliyet panosu: { isId, kat }
   gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
@@ -2827,19 +2829,84 @@ function muhSuz(){
   const q = (S.muh.ara || '').trim();
   return muhListe().filter(r => {
     if (S.muh.yon && r.y !== S.muh.yon) return false;
-    if (S.muh.odeme === 'odendi' && !(r.d === 'o' || r.d === 't')) return false;
-    if (S.muh.odeme === 'oneri'  && r.d !== 'n') return false;
-    if (S.muh.odeme === 'acik'   && r.d) return false;
+    const _d = muhDurum(r);
+    if (S.muh.odeme === 'odendi' && !(_d === 'o' || _d === 't')) return false;
+    if (S.muh.odeme === 'oneri'  && _d !== 'n') return false;
+    if (S.muh.odeme === 'acik'   && _d) return false;
     if (q && !muhAraUyar([r.k, r.n, r.pr], q)) return false;
     return true;
   });
 }
+/* ── ELLE ÖDEME ONAYI — masaüstü TERM ile ORTAK (users/{uid}/odemeOnay) ───────────
+   Muhasebe listesi masaüstünden gelen bir kopya; onayı listenin içine yazsaydık her
+   gönderimde silinirdi. Bu yüzden onaylar ayrı bir koleksiyonda duruyor ve iki taraf
+   da oraya yazıyor. Masaüstündeki karşılığı: onayKimlik/onayYaz. (Mert 24.09.2026) */
+function onayKimlik(no){
+  const t = String(no || '');
+  let h = 5381;
+  for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+  const slug = t.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+  return 'on-' + h.toString(36) + (slug ? '-' + slug : '');
+}
+function onayBul(no){
+  if (!no) return null;
+  return (S.odemeOnay || []).find(x => String(x.no || '') === String(no)) || null;
+}
+/* Satırın görünen ödeme durumu: elle onay, listeden gelen durumu EZER. */
+function muhDurum(r){
+  const el = onayBul(r.n);
+  if (el && el.durum === 'onay') return 'o';
+  if (el && el.durum === 'red')  return '';
+  return r.d || '';
+}
 function muhRozet(r){
-  if (r.d === 'o') return '<span class="mrz ok">&#10003; ödendi</span>';
-  if (r.d === 't') return '<span class="mrz tk">&#8987; taksit</span>';
-  if (r.d === 'n') return '<span class="mrz on">&#9203; öneri</span>';
-  if (r.d === 'p') return '<span class="mrz ks">&#9686; kısmi</span>';
-  return '<span class="mrz yk">—</span>';
+  const d = muhDurum(r), el = onayBul(r.n);
+  const elle = el && el.durum === 'onay' ? '<i class="mrz-e">elle</i>' : '';
+  const tik = r.n ? ` data-act="odeme-ac" data-no="${esc(r.n)}"` : '';
+  const et = r.n ? 'button' : 'span';
+  if (d === 'o') return `<${et} class="mrz ok"${tik}>&#10003; ödendi${elle}</${et}>`;
+  if (d === 't') return `<${et} class="mrz tk"${tik}>&#8987; taksit</${et}>`;
+  if (d === 'n') return `<${et} class="mrz on"${tik}>&#9203; öneri</${et}>`;
+  if (d === 'p') return `<${et} class="mrz ks"${tik}>&#9686; kısmi</${et}>`;
+  return `<${et} class="mrz yk"${tik} title="elle işaretlemek için dokun">—</${et}>`;
+}
+
+function odemeAc(no){
+  const r = muhListe().find(x => String(x.n || '') === String(no));
+  if (!r) return;
+  S.odemeOv = { no, r }; render();
+}
+function odemeKapat(){ S.odemeOv = null; render(); }
+async function odemeElle(no, karar){
+  const id = onayKimlik(no), v = onayBul(no);
+  try {
+    if (karar === null){ if (v) await S.store.remove('odemeOnay', v.id); }
+    else await S.store.setId('odemeOnay', id, { no, durum: karar, ts: Date.now(), kaynak: 'telefon' });
+    S.odemeOv = null; render();
+    note(karar === 'onay' ? 'Ödendi olarak işaretlendi.' : karar === 'red' ? 'Ödenmedi olarak işaretlendi.' : 'Elle kayıt silindi.');
+  } catch(e){ note('Kaydedilemedi: ' + (e && e.message ? e.message : 'bağlantı hatası')); }
+}
+function odemeOverlay(){
+  const o = S.odemeOv; if (!o) return '';
+  const r = o.r, el = onayBul(o.no);
+  const dv = (r.p && r.p !== 'TL' && r.tl != null) ? ` (${muhTL(r.tl)} ₺)` : '';
+  return `<div class="itov" data-act="odeme-kapat"><div class="itovk" data-act="it-ov-ic">
+    <div class="itovb ml">Ödeme durumu</div>
+    <div class="itovg">
+      <p class="itovm"><b>${esc(r.k || '')}</b><br>${esc(r.n || '')} · ${esc(muhGun(r.t))}</p>
+      <div class="mlkl"><div class="mlk"><span>Tutar</span><b>${muhTL(r.v)} ${r.p === 'TL' ? '₺' : esc(r.p || '')}${dv}</b></div>
+        <div class="mlk"><span>Durum</span><b>${muhDurum(r) === 'o' ? 'Ödendi' : muhDurum(r) === 't' ? 'Taksitli' : muhDurum(r) === 'n' ? 'Öneri bekliyor' : 'Ödenmemiş'}</b></div></div>
+      ${el ? `<p class="mlkur">Bu satırı <b>elle</b> sen işaretledin${el.kaynak ? ' (' + esc(el.kaynak === 'telefon' ? 'telefon' : 'bilgisayar') + ')' : ''}. Bilgisayardaki TERM'de de böyle görünür.</p>`
+           : '<p class="mlkur">Elle işaretlersen bilgisayardaki TERM\'de de aynı görünür. Banka eşleşmesine dokunulmaz.</p>'}
+      <div class="ftbtn-l">
+        <button class="itbtn ok" data-act="odeme-onay">&#10003; Ödendi işaretle</button>
+        <button class="itbtn rd" data-act="odeme-red">Ödenmedi işaretle</button>
+      </div>
+      <div class="itovf">
+        ${el ? '<button class="itbtn gr" data-act="odeme-sil">Elle kaydı sil</button>' : ''}
+        <button class="itbtn gr" data-act="odeme-kapat">Kapat</button>
+      </div>
+    </div></div></div>`;
 }
 function muhView(){
   const meta = muhMeta();
@@ -2856,7 +2923,7 @@ function muhView(){
     const v = (r.p && r.p !== 'TL') ? (r.tl != null ? r.tl : null) : r.v;
     if (v == null) return;
     if (r.y === 'G') giden += v; else gelen += v;
-    if (!r.d) acik += v;
+    if (!muhDurum(r)) acik += v;      /* elle işaretlenen artık açık sayılmaz */
   });
   const gor = L.slice(0, S.muh.limit);
   let h = '<div class="mwrap">';
@@ -3741,6 +3808,7 @@ function render(){
   main.innerHTML += fotoOverlay();      /* fotoğraf penceresi her sekmede açılabilir */
   main.innerHTML += konumOverlay();
   main.innerHTML += malOverlay();       /* maliyet panosu */
+  main.innerHTML += odemeOverlay();     /* ödeme durumu penceresi */
   const mara = document.getElementById('m-ara');
   if (mara){
     let tm = null;
@@ -4325,6 +4393,11 @@ document.addEventListener('click', async (e) => {
   if (a === 'foto-panel'){ fotoAc(b.dataset.k, b.dataset.b || ''); return; }
   if (a === 'konum-panel'){ konumAc(b.dataset.k, b.dataset.b || ''); return; }
   if (a === 'mal-panel'){ malAc(b.dataset.id); return; }
+  if (a === 'odeme-ac'){ odemeAc(b.dataset.no); return; }
+  if (a === 'odeme-kapat'){ odemeKapat(); return; }
+  if (a === 'odeme-onay'){ await odemeElle(S.odemeOv && S.odemeOv.no, 'onay'); return; }
+  if (a === 'odeme-red'){ await odemeElle(S.odemeOv && S.odemeOv.no, 'red'); return; }
+  if (a === 'odeme-sil'){ await odemeElle(S.odemeOv && S.odemeOv.no, null); return; }
   if (a === 'mal-kapat'){ malKapat(); return; }
   if (a === 'mal-kat'){ if (S.malOv){ S.malOv.kat = (S.malOv.kat === b.dataset.v) ? '' : b.dataset.v; render(); } return; }
   if (a === 'konum-kapat'){ konumKapat(); return; }
@@ -4560,6 +4633,7 @@ function bind(store, label, kind){
   S.unsub.push(store.subscribe('stokHareket', rows => { S.stokHareket = rows; if (S.tab === 'stok') render(); }));
   S.unsub.push(store.subscribe('foto', rows => { S.foto = rows; render(); }));
   S.unsub.push(store.subscribe('konum', rows => { S.konum = rows; render(); }));
+  S.unsub.push(store.subscribe('odemeOnay', rows => { S.odemeOnay = rows; if (S.tab === 'muh') render(); }));
   S.unsub.push(store.subscribe('gecmis', rows => { S.gecmis = rows; gaDugme(); gaPanelCiz(); }));
 }
 

@@ -975,3 +975,8 @@ html,body{overscroll-behavior-x:contain;}
 :root[data-theme="dark"] .mlk.g>span{color:#8FD6AC;} :root[data-theme="dark"] .mlk.g>b{color:#A9E6C2;}
 :root[data-theme="dark"] .mlbas.g{color:#8FD6AC;}
 :root[data-theme="dark"] .mluy2{background:#33211C;border-color:#5A3A2A;color:#E8B896;}
+
+/* Ödeme rozeti artık dokunulabilir (elle "ödendi" işaretleme) — Mert 24.09.2026 */
+button.mrz{font:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
+.mrz-e{font-style:normal;font-size:8.5px;opacity:.7;font-weight:700;letter-spacing:.04em;}
+.mrz.yk{border:1px dashed var(--line-2);padding:1px 7px;border-radius:999px;color:var(--ink-3);}
