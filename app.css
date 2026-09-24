@@ -854,3 +854,15 @@ html,body{overscroll-behavior-x:contain;}
 .sbek-f{display:inline-flex;align-items:center;gap:1px}
 .sbek-f svg{width:13px;height:13px}
 .sbek-f i{font-style:normal;font-size:9px;font-weight:800;vertical-align:super}
+
+/* ===== KONUM ===== */
+.itovb.kn{background:#2F5D7C;}
+.itbtn.kn{display:inline-flex;align-items:center;gap:5px;background:#EAF1F7;color:#2F5D7C;border:1px solid #B9CFE0;}
+.itbtn.kn.var{background:#2F5D7C;color:#fff;border-color:#2F5D7C;}
+.itbtn.kn svg{width:14px;height:14px;flex:0 0 auto}
+.knsim{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:#F2F6FA;border:1px solid #D6E2EC;
+  border-radius:9px;padding:9px 11px;margin-bottom:12px}
+.knk{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;font-weight:700;color:#1F3864}
+.knd{font-size:10.5px;color:#7C8DA4;font-weight:600}
+.knhar{margin-left:auto;font-size:12px;font-weight:700;color:#2F5D7C;text-decoration:underline}
+.knhata{font-size:12px;color:#9C3B2A;margin:8px 0 0;line-height:1.45}

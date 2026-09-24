@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-foto2";
+const APP_VERSION = "2026.09.24-konum";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -40,7 +40,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp
 
 /* ============ depo: yerel ============ */
 /* 'fotoTam' bilerek ABONE OLUNMAZ — tam boyut fotoğraflar sadece bakarken tek belge çekilir */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'foto', 'fotoTam', 'gecmis'];
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'foto', 'fotoTam', 'konum', 'gecmis'];
 
 function localStore(){
   let data = {};
@@ -91,6 +91,7 @@ const S = {
   view: (() => { try { return localStorage.getItem('izo-view') === 'month' ? 'month' : 'week'; } catch(e){ return 'week'; } })(),
   jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], foto: [], gecmis: [],
   fotoOv: null,        // açık fotoğraf penceresi: { hedef, baslik, etiket, not, bekle, goster, tam }
+  konum: [], konumOv: null,   // şantiye konumları + açık konum penceresi
   gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
   stk: { firma:'', ara:'', limit:60 },
@@ -279,6 +280,9 @@ const ICON_PIN = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" 
 const ICON_CAM = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M3 7.2h2.6L7 5.2h6l1.4 2H17a1 1 0 0 1 1 1v6.3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8.2a1 1 0 0 1 1-1z"/>
   <circle cx="10" cy="11.3" r="2.7"/></svg>`;
+const ICON_PIN2 = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10 17.5s5.2-4.7 5.2-8.6a5.2 5.2 0 0 0-10.4 0c0 3.9 5.2 8.6 5.2 8.6z"/>
+  <circle cx="10" cy="8.8" r="2"/></svg>`;
 const ICON_COPY = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5">
   <rect x="7" y="7" width="8.5" height="8.5" rx="2"/>
   <path d="M12.5 4.5H6a1.5 1.5 0 0 0-1.5 1.5v6.5"/></svg>`;
@@ -1902,6 +1906,207 @@ function stokAlanlar(x){
   return [x.k, x.c, x.d, x.r, x.e, x.n, x.f, stokEkKelime(x.k, x.r, x.b, x.e)];
 }
 
+
+/* ═══════════════ KONUM (şantiye) ═══════════════
+   Her işin (devam eden + bekleyen teklif) bir şantiye konumu olur. Dört kaynak:
+     · telefonun GPS'i — fotoğraf eklerken ya da "Şu an buradayım" düğmesiyle
+     · fotoğrafın EXIF GPS'i — SIKIŞTIRMADAN ÖNCE orijinal dosyadan okunur
+       (canvas'ta yeniden kodlama EXIF'i siliyor, o yüzden sıra önemli)
+     · elle yazılan adres / etiket
+     · yapıştırılan Google Maps linki (koordinat ondan çıkarılır)
+   Adres çözümü YOK — koordinat + harita linki + Mert'in yazdığı etiket yeter.
+   Firestore'da 'konum' koleksiyonu; belge kimliği hedefin kendisi (is:… / tkf:…),
+   böylece Apps Script'e ya da İş Takip sheet'ine dokunmak gerekmiyor.  (Mert 24.09.2026) */
+
+const kisalt2 = (t, n) => { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+function konumAl(hedef){ return (S.konum || []).find(k => k.id === hedef) || null; }
+const konumVar = hedef => !!konumAl(hedef);
+function konumYaz(hedef, o){
+  return S.store.setId('konum', hedef, { ...o, ts: Date.now() });
+}
+function konumSil(hedef){ return S.store.remove('konum', hedef); }
+const konumLink = k => (k && k.lat != null)
+  ? `https://www.google.com/maps/search/?api=1&query=${k.lat},${k.lon}` : '';
+const konumYaz6 = n => (+n).toFixed(6);
+function konumOzet(k){
+  if (!k) return '';
+  if (k.etiket) return k.etiket;
+  return (k.lat != null) ? `${konumYaz6(k.lat)}, ${konumYaz6(k.lon)}` : '';
+}
+const KONUM_KAYNAK = { gps:'telefon GPS', exif:'fotoğraf', el:'elle', link:'harita linki' };
+
+/* ---- telefonun GPS'i ---- */
+function gpsOku(){
+  return new Promise(res => {
+    if (!navigator.geolocation) return res({ hata:'Bu tarayıcı konum vermiyor.' });
+    navigator.geolocation.getCurrentPosition(
+      p => res({ lat:p.coords.latitude, lon:p.coords.longitude, dogruluk:Math.round(p.coords.accuracy||0) }),
+      e => res({ hata: e.code === 1 ? 'Konum izni verilmedi.'
+               : e.code === 3 ? 'Konum alınamadı (zaman aşımı).' : 'Konum alınamadı.' }),
+      { enableHighAccuracy:true, timeout:12000, maximumAge:60000 });
+  });
+}
+
+/* ---- fotoğrafın EXIF GPS'i (sıkıştırmadan ÖNCE, orijinal dosyadan) ---- */
+function exifKonum(file){
+  return new Promise(res => {
+    const fr = new FileReader();
+    fr.onload = () => { try { res(exifGps(new DataView(fr.result))); } catch(e){ res(null); } };
+    fr.onerror = () => res(null);
+    try { fr.readAsArrayBuffer(file.slice(0, 384 * 1024)); } catch(e){ res(null); }   /* EXIF dosyanın başında */
+  });
+}
+function exifGps(v){
+  if (v.byteLength < 16 || v.getUint16(0) !== 0xFFD8) return null;      /* JPEG değil */
+  let o = 2;
+  while (o + 4 < v.byteLength){
+    if (v.getUint8(o) !== 0xFF) return null;
+    const m = v.getUint8(o + 1);
+    if (m === 0xDA || m === 0xD9) return null;                          /* görüntü verisi başladı */
+    const len = v.getUint16(o + 2);
+    if (m === 0xE1 && o + 10 < v.byteLength && v.getUint32(o + 4) === 0x45786966) return tiffGps(v, o + 10);
+    o += 2 + len;
+  }
+  return null;
+}
+function tiffGps(v, t){
+  if (t + 8 > v.byteLength) return null;
+  const le = v.getUint16(t) === 0x4949;
+  const u16 = p => v.getUint16(p, le), u32 = p => v.getUint32(p, le);
+  if (u16(t + 2) !== 42) return null;
+  const ifd = t + u32(t + 4);
+  if (ifd + 2 > v.byteLength) return null;
+  let gpsOff = 0;
+  const n0 = u16(ifd);
+  for (let i = 0; i < n0; i++){
+    const e = ifd + 2 + i * 12;
+    if (e + 12 > v.byteLength) break;
+    if (u16(e) === 0x8825){ gpsOff = u32(e + 8); break; }
+  }
+  if (!gpsOff) return null;
+  const g = t + gpsOff;
+  if (g + 2 > v.byteLength) return null;
+  const gn = u16(g);
+  let latRef = '', lonRef = '', lat = null, lon = null;
+  const derece = p => {                       /* 3 RATIONAL: derece, dakika, saniye */
+    let s = 0;
+    for (let k = 0; k < 3; k++){
+      const num = u32(p + k * 8), den = u32(p + k * 8 + 4);
+      s += (den ? num / den : 0) / Math.pow(60, k);
+    }
+    return s;
+  };
+  for (let i = 0; i < gn; i++){
+    const e = g + 2 + i * 12;
+    if (e + 12 > v.byteLength) break;
+    const tag = u16(e), cnt = u32(e + 4);
+    if (tag === 1 || tag === 3){ const c = String.fromCharCode(v.getUint8(e + 8)); if (tag === 1) latRef = c; else lonRef = c; }
+    if ((tag === 2 || tag === 4) && cnt === 3){
+      const p = t + u32(e + 8);
+      if (p + 24 > v.byteLength) continue;
+      if (tag === 2) lat = derece(p); else lon = derece(p);
+    }
+  }
+  if (lat == null || lon == null || (!lat && !lon)) return null;
+  if (latRef === 'S') lat = -lat;
+  if (lonRef === 'W') lon = -lon;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+/* ---- yapıştırılan metinden koordinat çıkar (Maps linki ya da "41.0082, 28.9784") ---- */
+function konumMetinCoz(t){
+  const s = String(t || '');
+  let m = s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)                      /* .../@41.00,28.97,17z */
+       || s.match(/[?&]query=(-?\d+\.\d+)%2C(-?\d+\.\d+)/i)
+       || s.match(/[?&](?:q|query|ll|daddr)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
+       || s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)
+       || s.match(/^\s*(-?\d{1,2}\.\d+)\s*[,;]\s*(-?\d{1,3}\.\d+)\s*$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+  if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+/* ---- pencere ---- */
+function konumAc(hedef, baslik){
+  S.konumOv = { hedef, baslik: baslik || '', metin:'', etiket:'', bekle:false, hata:'' };
+  render();
+}
+function konumKapat(){ S.konumOv = null; render(); }
+function konumFormAl(){
+  const o = S.konumOv; if (!o) return;
+  const a = document.getElementById('kn-etiket'); if (a) o.etiket = a.value;
+  const b = document.getElementById('kn-metin');  if (b) o.metin  = b.value;
+}
+async function konumSuAn(hedef, sessiz){
+  const g = await gpsOku();
+  if (g.hata){ if (!sessiz) note(g.hata); return null; }
+  const eski = konumAl(hedef) || {};
+  await konumYaz(hedef, { lat:g.lat, lon:g.lon, dogruluk:g.dogruluk, kaynak:'gps',
+                          etiket: eski.etiket || '' });
+  if (!sessiz) note(`Konum kaydedildi (±${g.dogruluk} m).`);
+  return g;
+}
+async function konumKaydet(){
+  konumFormAl();
+  const o = S.konumOv; if (!o) return;
+  const c = o.metin.trim() ? konumMetinCoz(o.metin) : null;
+  if (o.metin.trim() && !c){
+    o.hata = 'Koordinat okunamadı. Google Maps linki ya da "41.0082, 28.9784" biçiminde yaz.';
+    render(); return;
+  }
+  const eski = konumAl(o.hedef) || {};
+  /* "Şu an buradayım" ile dolduysa kaynak GPS'tir — yapıştırılmış link değil */
+  const gpsIle = c && o.sonGps && o.metin.trim() === o.sonGps;
+  const yeni = { etiket: o.etiket.trim(), kaynak: gpsIle ? 'gps' : (c ? 'link' : 'el') };
+  if (c){ yeni.lat = c.lat; yeni.lon = c.lon; if (gpsIle && o.sonDogruluk) yeni.dogruluk = o.sonDogruluk; }
+  else if (eski.lat != null){ yeni.lat = eski.lat; yeni.lon = eski.lon; yeni.kaynak = eski.kaynak || 'el'; }
+  if (yeni.lat == null && !yeni.etiket){ o.hata = 'Ya bir etiket yaz ya da koordinat/link ver.'; render(); return; }
+  await konumYaz(o.hedef, yeni);
+  S.konumOv = null; render(); note('Konum kaydedildi.');
+}
+async function konumOvGps(){
+  const o = S.konumOv; if (!o) return;
+  konumFormAl(); o.bekle = true; o.hata = ''; render();
+  const g = await gpsOku();
+  if (!S.konumOv) return;
+  S.konumOv.bekle = false;
+  if (g.hata){ S.konumOv.hata = g.hata; render(); return; }
+  S.konumOv.metin = `${konumYaz6(g.lat)}, ${konumYaz6(g.lon)}`;
+  S.konumOv.sonGps = S.konumOv.metin; S.konumOv.sonDogruluk = g.dogruluk;
+  render();
+}
+
+function konumOverlay(){
+  const o = S.konumOv; if (!o) return '';
+  const k = konumAl(o.hedef), l = konumLink(k);
+  return `<div class="itov" data-act="konum-kapat"><div class="itovk" data-act="it-ov-ic">
+    <div class="itovb kn">Şantiye konumu</div>
+    <div class="itovg">
+      ${o.baslik ? `<p class="itovm">${esc(o.baslik)}</p>` : ''}
+      ${k && k.lat != null ? `<div class="knsim">
+          <span class="knk">${esc(konumYaz6(k.lat))}, ${esc(konumYaz6(k.lon))}</span>
+          ${k.dogruluk ? `<span class="knd">±${k.dogruluk} m</span>` : ''}
+          <span class="knd">${esc(KONUM_KAYNAK[k.kaynak] || '')}</span>
+          <a class="knhar" href="${l}" target="_blank" rel="noopener">Haritada aç</a>
+        </div>` : '<p class="vq">Bu iş için henüz konum yok.</p>'}
+      <label class="itovn">Etiket (kat, blok, giriş…)
+        <input id="kn-etiket" type="text" placeholder="ör. 3. kat koridor" value="${esc(o.etiket || (k && k.etiket) || '')}"></label>
+      <label class="itovn">Koordinat ya da Google Maps linki
+        <input id="kn-metin" type="text" inputmode="text" placeholder="41.0082, 28.9784  ya da  maps linki" value="${esc(o.metin)}"></label>
+      ${o.hata ? `<p class="knhata">${esc(o.hata)}</p>` : ''}
+      <div class="ftbtn-l">
+        <button class="itbtn bl" data-act="konum-gps" ${o.bekle ? 'disabled' : ''}>${o.bekle ? 'Alınıyor…' : '&#9678; Şu an buradayım'}</button>
+        <button class="itbtn ok" data-act="konum-kaydet">Kaydet</button>
+      </div>
+      <div class="itovf">
+        ${k ? '<button class="itbtn rd" data-act="konum-sil">Konumu kaldır</button>' : ''}
+        <button class="itbtn gr" data-act="konum-kapat">Kapat</button>
+      </div>
+    </div></div></div>`;
+}
+
 /* ============ FAZ 3: sesle depo hareketi (masaüstü TERM ile aynı) ============ */
 const STOK_ISLEM = ['stok-giris', 'stok-cikis'];
 let stokSecenek = null, stokBekKomut = null;
@@ -2695,6 +2900,7 @@ function isTakipView(){
         ${x.teslim ? `<div class="mr-4">Teslim: ${esc(trTarih(x.teslim))}</div>` : ''}
         ${acikMi ? `<div class="itact">
           <button class="itbtn fo" data-act="foto-panel" data-k="is:${esc(x.is_id)}" data-b="${esc((x.musteri||'') + (x.proje ? ' — ' + x.proje : ''))}">${ICON_CAM}Fotoğraf${fotoSayi('is:' + x.is_id) ? ' (' + fotoSayi('is:' + x.is_id) + ')' : ''}</button>
+          <button class="itbtn kn${konumVar('is:' + x.is_id) ? ' var' : ''}" data-act="konum-panel" data-k="is:${esc(x.is_id)}" data-b="${esc((x.musteri||'') + (x.proje ? ' — ' + x.proje : ''))}">${ICON_PIN2}${konumVar('is:' + x.is_id) ? esc(kisalt2(konumOzet(konumAl('is:' + x.is_id)), 18)) : 'Konum'}</button>
           <button class="itbtn ok" data-act="it-bitir" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Bitir</button>
           <button class="itbtn rd" data-act="it-sil" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Sil</button>
           ${mesgul ? '<span class="itbek">kaydediliyor…</span>' : ''}
@@ -2716,6 +2922,7 @@ function isTakipView(){
           <span class="mtut">${paraYaz(t.tutar_usd, 'USD')}</span></div>
         ${acikMi ? `<div class="itact">
           <button class="itbtn fo" data-act="foto-panel" data-k="tkf:${esc(t.id)}" data-b="${esc((t.musteri||'') + (t.proje ? ' — ' + t.proje : ''))}">${ICON_CAM}Fotoğraf${fotoSayi('tkf:' + t.id) ? ' (' + fotoSayi('tkf:' + t.id) + ')' : ''}</button>
+          <button class="itbtn kn${konumVar('tkf:' + t.id) ? ' var' : ''}" data-act="konum-panel" data-k="tkf:${esc(t.id)}" data-b="${esc((t.musteri||'') + (t.proje ? ' — ' + t.proje : ''))}">${ICON_PIN2}${konumVar('tkf:' + t.id) ? esc(kisalt2(konumOzet(konumAl('tkf:' + t.id)), 18)) : 'Konum'}</button>
           ${dur === 'HAZIR' ? `<button class="itbtn bl" data-act="it-gonder" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Gönderildi</button>` : ''}
           ${(dur !== 'KABUL' && dur !== 'RED') ? `
             <button class="itbtn ok" data-act="it-kabul" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Kabul</button>
@@ -2857,10 +3064,30 @@ async function fotoYukle(kamera){
   o.not = not;
   o.bekle = dosyalar.length; render();
   let n = 0, hata = '';
+  /* Konum: iş/teklif hedefinde ve henüz konum yoksa fotoğraftan yakala.
+     EXIF sıkıştırmadan ÖNCE okunmalı — canvas'ta yeniden kodlama EXIF'i siliyor. */
+  const konumHedef = /^(is|tkf):/.test(o.hedef) ? o.hedef : '';
+  let konumBulundu = null;
+  if (konumHedef && !konumVar(konumHedef)){
+    for (const f of dosyalar){
+      const e = await exifKonum(f);
+      if (e){ konumBulundu = { ...e, kaynak:'exif' }; break; }
+    }
+  }
   for (const f of dosyalar){
     try { await fotoKaydet(o.hedef, f, o.etiket, not); n++; }
     catch(e){ hata = e.message || 'kaydedilemedi'; }
     if (S.fotoOv === o){ o.bekle = dosyalar.length - n; render(); }
+  }
+  if (konumHedef && !konumVar(konumHedef)){
+    if (!konumBulundu){                                   /* EXIF yoksa telefonun GPS'ini dene */
+      const g = await gpsOku();
+      if (!g.hata) konumBulundu = { lat:g.lat, lon:g.lon, dogruluk:g.dogruluk, kaynak:'gps' };
+    }
+    if (konumBulundu){
+      await konumYaz(konumHedef, { ...konumBulundu, etiket:'' });
+      note(konumBulundu.kaynak === 'exif' ? 'Konum fotoğraftan alındı.' : 'Konum telefondan alındı.');
+    }
   }
   if (S.fotoOv === o){ o.bekle = 0; o.not = ''; render(); }
   if (hata) note('Bazı fotoğraflar eklenemedi: ' + hata);
@@ -3284,6 +3511,7 @@ function render(){
     : S.tab === 'week' ? (S.view === 'month' && window.innerWidth >= 1000 ? monthView() : weekView())
     : S.tab === 'undated' ? undatedView() : jobsView();
   main.innerHTML += fotoOverlay();      /* fotoğraf penceresi her sekmede açılabilir */
+  main.innerHTML += konumOverlay();
   const mara = document.getElementById('m-ara');
   if (mara){
     let tm = null;
@@ -3866,6 +4094,17 @@ document.addEventListener('click', async (e) => {
   }
   if (a === 'stok-kaydet'){ stokKaydet(); return; }
   if (a === 'foto-panel'){ fotoAc(b.dataset.k, b.dataset.b || ''); return; }
+  if (a === 'konum-panel'){ konumAc(b.dataset.k, b.dataset.b || ''); return; }
+  if (a === 'konum-kapat'){ konumKapat(); return; }
+  if (a === 'konum-gps'){ konumOvGps(); return; }
+  if (a === 'konum-kaydet'){ konumKaydet(); return; }
+  if (a === 'konum-sil'){
+    if (!S.konumOv) return;
+    if (!confirm('Bu işin konumu kaldırılsın mı?')) return;
+    const h = S.konumOv.hedef; S.konumOv = null;
+    konumSil(h).then(() => { note('Konum kaldırıldı.'); render(); });
+    return;
+  }
   if (a === 'foto-kapat'){ fotoKapat(); return; }
   if (a === 'foto-etiket'){
     if (S.fotoOv){
@@ -4088,6 +4327,7 @@ function bind(store, label, kind){
   S.unsub.push(store.subscribe('stok', rows => { S.stok = rows; if (S.tab === 'stok') render(); }));
   S.unsub.push(store.subscribe('stokHareket', rows => { S.stokHareket = rows; if (S.tab === 'stok') render(); }));
   S.unsub.push(store.subscribe('foto', rows => { S.foto = rows; render(); }));
+  S.unsub.push(store.subscribe('konum', rows => { S.konum = rows; render(); }));
   S.unsub.push(store.subscribe('gecmis', rows => { S.gecmis = rows; gaDugme(); gaPanelCiz(); }));
 }
 
