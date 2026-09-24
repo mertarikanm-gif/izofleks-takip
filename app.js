@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-bulutonay";
+const APP_VERSION = "2026.09.24-knipuc";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2099,11 +2099,11 @@ async function konumKaydet(){
   const c = o.metin.trim() ? konumMetinCoz(o.metin) : null;
   if (o.metin.trim() && !c){
     o.hata = konumKisaLink(o.metin)
-      ? 'Bu kısaltılmış bir paylaşım linki (maps.app.goo.gl) — içinde koordinat yok, uygulama açamaz. '
-        + 'Google Maps\'te yere basılı tut, üstte çıkan koordinata dokun (panoya kopyalanır), onu yapıştır. '
-        + 'Ya da şantiyedeysen "Şu an buradayım" düğmesini kullan.'
-      : 'Koordinat okunamadı. Maps\'in adres çubuğundaki uzun link, "41.0082, 28.9784" ya da '
-        + '41°00\'29.7"N 28°58\'42.1"E biçimi çalışır.';
+      ? 'Bu bir PAYLAŞ linki (maps.app.goo.gl) — içinde koordinat yok, hiçbir uygulama açamaz. '
+        + 'Şunu yap: Maps\'te yere basılı tut → üstte çıkan koordinata dokun (panoya kopyalanır) → buraya yapıştır. '
+        + 'Şantiyedeysen “Şu an buradayım” en kolayı.'
+      : 'Koordinat okunamadı. "41.0677017, 29.0046451" biçiminde yapıştır; '
+        + 'Maps adres çubuğundaki uzun adres ve 41°04\'03.7"N 29°00\'16.7"E biçimi de olur.';
     render(); return;
   }
   const eski = konumAl(o.hedef) || {};
@@ -2143,8 +2143,10 @@ function konumOverlay(){
         </div>` : '<p class="vq">Bu iş için henüz konum yok.</p>'}
       <label class="itovn">Etiket (kat, blok, giriş…)
         <input id="kn-etiket" type="text" placeholder="ör. 3. kat koridor" value="${esc(o.etiket || (k && k.etiket) || '')}"></label>
-      <label class="itovn">Koordinat ya da Google Maps linki
-        <input id="kn-metin" type="text" inputmode="text" placeholder="41.0082, 28.9784  ya da  maps linki" value="${esc(o.metin)}"></label>
+      <label class="itovn">Koordinat
+        <input id="kn-metin" type="text" inputmode="text" placeholder="41.0677017, 29.0046451" value="${esc(o.metin)}"></label>
+      <p class="knipc">Maps'te yere <b>basılı tut</b> → üstte çıkan koordinata dokun (panoya kopyalanır) → buraya yapıştır.
+        <b>Paylaş</b> linki (maps.app.goo.gl) olmaz — içinde koordinat yoktur.</p>
       ${o.hata ? `<p class="knhata">${esc(o.hata)}</p>` : ''}
       <div class="ftbtn-l">
         <button class="itbtn bl" data-act="konum-gps" ${o.bekle ? 'disabled' : ''}>${o.bekle ? 'Alınıyor…' : '&#9678; Şu an buradayım'}</button>

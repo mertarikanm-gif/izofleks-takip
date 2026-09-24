@@ -980,3 +980,7 @@ html,body{overscroll-behavior-x:contain;}
 button.mrz{font:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
 .mrz-e{font-style:normal;font-size:8.5px;opacity:.7;font-weight:700;letter-spacing:.04em;}
 .mrz.yk{border:1px dashed var(--line-2);padding:1px 7px;border-radius:999px;color:var(--ink-3);}
+/* Konum penceresi ipucu — "Paylaş linki olmaz" (Mert 24.09.2026) */
+.knipc{font-size:11px;line-height:1.5;color:var(--ink-3);background:var(--panel-2);
+  border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:-4px 0 11px;}
+.knipc b{color:var(--ink-2);}
