@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-konum";
+const APP_VERSION = "2026.09.24-malpano";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -92,6 +92,7 @@ const S = {
   jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], foto: [], gecmis: [],
   fotoOv: null,        // açık fotoğraf penceresi: { hedef, baslik, etiket, not, bekle, goster, tam }
   konum: [], konumOv: null,   // şantiye konumları + açık konum penceresi
+  malOv: null,         // açık maliyet panosu: { isId, kat }
   gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
   stk: { firma:'', ara:'', limit:60 },
@@ -283,6 +284,9 @@ const ICON_CAM = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" 
 const ICON_PIN2 = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
   <path d="M10 17.5s5.2-4.7 5.2-8.6a5.2 5.2 0 0 0-10.4 0c0 3.9 5.2 8.6 5.2 8.6z"/>
   <circle cx="10" cy="8.8" r="2"/></svg>`;
+const ICON_PIE = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10 3.2a6.8 6.8 0 1 0 6.8 6.8H10z"/>
+  <path d="M12.6 2.6a6.8 6.8 0 0 1 4.8 4.8h-4.8z"/></svg>`;
 const ICON_COPY = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5">
   <rect x="7" y="7" width="8.5" height="8.5" rx="2"/>
   <path d="M12.5 4.5H6a1.5 1.5 0 0 0-1.5 1.5v6.5"/></svg>`;
@@ -735,7 +739,8 @@ function itBugun(){
 function itKar(T, M){
   if (!(T > 0) || !(M > 0)) return null;
   const bk = T - M, vergi = bk * 0.22 + bk * (1 - 0.22) * 0.2, net = bk - vergi;
-  return { brutKar: bk, netKar: net, brutKarPct: (T / M - 1) * 100, netKarPct: (net / T) * 100 };
+  return { teklif: T, maliyet: M, brutKar: bk, vergi: vergi, kdvFarki: bk * 0.2,
+           netKar: net, brutKarPct: (T / M - 1) * 100, netKarPct: (net / T) * 100 };
 }
 
 let a42Bekliyor = false;
@@ -2901,6 +2906,7 @@ function isTakipView(){
         ${acikMi ? `<div class="itact">
           <button class="itbtn fo" data-act="foto-panel" data-k="is:${esc(x.is_id)}" data-b="${esc((x.musteri||'') + (x.proje ? ' — ' + x.proje : ''))}">${ICON_CAM}Fotoğraf${fotoSayi('is:' + x.is_id) ? ' (' + fotoSayi('is:' + x.is_id) + ')' : ''}</button>
           <button class="itbtn kn${konumVar('is:' + x.is_id) ? ' var' : ''}" data-act="konum-panel" data-k="is:${esc(x.is_id)}" data-b="${esc((x.musteri||'') + (x.proje ? ' — ' + x.proje : ''))}">${ICON_PIN2}${konumVar('is:' + x.is_id) ? esc(kisalt2(konumOzet(konumAl('is:' + x.is_id)), 18)) : 'Konum'}</button>
+          <button class="itbtn ml" data-act="mal-panel" data-id="${esc(x.is_id)}">${ICON_PIE}Maliyet</button>
           <button class="itbtn ok" data-act="it-bitir" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Bitir</button>
           <button class="itbtn rd" data-act="it-sil" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Sil</button>
           ${mesgul ? '<span class="itbek">kaydediliyor…</span>' : ''}
@@ -3155,6 +3161,176 @@ function fotoGun(ts){
   const d = new Date(+ts || 0);
   if (!(+ts)) return '';
   return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear();
+}
+
+/* ═══════════════ MALİYET PANOSU (masaüstü TERM ile aynı pano) ═══════════════
+   Telefonda A42 kartı / poz verisi yok; bu yüzden masaüstündeki "MK alt kategoriler"
+   ve "Kapsam — faturalandı ✓ / kalan" blokları YOK. Geri kalan bire bir:
+   KPI kutuları → Teklife Göre kâr → Gerçekleşen kâr → pasta grafik → kategori çubukları.
+   $ karşılıkları işin KİLİTLİ kuru (x.kur) ile — telefonda canlı kur yok. (Mert 24.09.2026) */
+const MAL_RENK = { 'Cam':'#3A7EBF', 'Profil':'#6B46C1', 'Fason Boya':'#2C7A7B', 'Aksesuar':'#276749',
+                   'Sarf Malzeme':'#C05621', 'İşçilik':'#B7791F', 'Diğer Kalemler':'#718096' };
+/* Kategori SADECE faturanın kendi alanından okunur. Masaüstündeki fatura no → kategori
+   tablosu (IZ_FATURA_MK) BİLEREK buraya taşınmadı: bu depo herkese açık, gerçek tedarikçi
+   fatura numaraları dışarı çıkmasın. Kategorisi boş fatura "Atanmamış" olarak görünür ve
+   panoda uyarı satırı çıkar — o da sheet'te kategoriyi doldurmayı hatırlatır. (Mert 24.09.2026) */
+function malFaturaKat(f){ return f ? String(f.kategori || f.mk || '') : ''; }
+/* İş kaydındaki MK bütçesi: '{"Cam":123,...}' metni ya da nesne */
+function malButce(x){
+  try {
+    if (typeof x.mk_butce === 'string' && x.mk_butce) return JSON.parse(x.mk_butce);
+    if (x.mk_butce && typeof x.mk_butce === 'object') return x.mk_butce;
+  } catch(e){}
+  return null;
+}
+const malUf = n => (+n || 0).toLocaleString('tr-TR', { maximumFractionDigits:0 });
+
+function malAc(isId){ S.malOv = { isId, kat:'' }; render(); }
+function malKapat(){ S.malOv = null; render(); }
+
+/* Pasta dilimi (donut) — masaüstündeki _arc ile aynı geometri */
+function malArc(a0, a1, col){
+  const cx = 100, cy = 100, r = 92;
+  const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+  const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+  const big = (a1 - a0) > Math.PI ? 1 : 0;
+  return `<path d="M${cx} ${cy} L${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${big} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z" fill="${col}"/>`;
+}
+
+function malOverlay(){
+  const o = S.malOv; if (!o) return '';
+  const x = (S.a42.isler || []).find(z => String(z.is_id || '') === String(o.isId));
+  if (!x) return `<div class="itov" data-act="mal-kapat"><div class="itovk" data-act="it-ov-ic">
+    <div class="itovb ml">Maliyet panosu</div>
+    <div class="itovg"><p class="vq">İş kaydı bulunamadı.</p>
+    <div class="itovf"><button class="itbtn gr" data-act="mal-kapat">Kapat</button></div></div></div></div>`;
+
+  const fs  = (S.a42.faturalar || []).filter(f => String(f.is_id || '') === String(o.isId));
+  const kur = +x.kur || 0;
+  const sozUSD = +x.sozlesme_usd || 0, sozTL = +x.sozlesme_tl || 0;
+  const sozIsTL = (String(x.sozlesme_para || '').toUpperCase() === 'TL' && sozTL > 0);
+  const sozTLval  = sozIsTL ? sozTL : (kur > 0 ? sozUSD * kur : 0);
+  const sozUSDval = sozIsTL ? (kur > 0 ? sozTL / kur : 0) : sozUSD;
+
+  const gerTL = fs.reduce((s, f) => s + (+f.tutar_kdvharic || 0), 0);
+  const mkB = malButce(x);
+  const butceTL = mkB ? Object.keys(mkB).reduce((s, k) => s + (+mkB[k] || 0), 0) : 0;
+  const malTL  = butceTL > 0 ? butceTL : (kur > 0 ? (+x.plan_maliyet_usd || 0) * kur : 0);
+  const malUSD = butceTL > 0 ? (kur > 0 ? butceTL / kur : 0) : (+x.plan_maliyet_usd || 0);
+  const gerUSD = kur > 0 ? gerTL / kur : 0;
+  const oran = malTL > 0 ? (gerTL / malTL * 100) : null;
+
+  const kpi = (l, v) => `<div class="mlk"><span>${l}</span><b>${v}</b></div>`;
+  const kpiG = (l, v) => `<div class="mlk g"><span>${l}</span><b>${v}</b></div>`;
+
+  let h = `<div class="itov" data-act="mal-kapat"><div class="itovk gen" data-act="it-ov-ic">
+    <div class="itovb ml">Maliyet panosu</div>
+    <div class="itovg">
+      <p class="itovm"><b>${esc(x.musteri || '')}</b>${x.proje ? ' — ' + esc(x.proje) : ''}${x.baslangic ? ' · ' + esc(trTarih(x.baslangic)) : ''}</p>
+      <div class="mlkl">
+        ${kpi('Sözleşme', sozIsTL
+            ? itTl(sozTLval) + ' ₺ <i class="mlsab">SABİT</i>' + (kur > 0 ? `<u>${malUf(sozUSDval)} $</u>` : '')
+            : malUf(sozUSD) + ' $' + (kur > 0 ? `<u>${itTl(sozTLval)} ₺</u>` : ''))}
+        ${kpi('Maliyet', (malUSD > 0 ? malUf(malUSD) + ' $' : '—') + (malTL > 0 ? `<u>${itTl(malTL)} ₺</u>` : ''))}
+        ${kpi('Gerçekleşen', itTl(gerTL) + ' ₺' + (kur > 0 ? `<u>${malUf(gerUSD)} $</u>` : ''))}
+        ${oran != null ? kpi('Gerç. / Maliyet', '%' + oran.toFixed(1)) : ''}
+        ${kpi('Fatura', String(fs.length))}
+      </div>`;
+
+  if (kur > 0) h += `<p class="mlkur">Kilit kur <b>${kur.toFixed(2)}</b> — telefonda canlı kur yok, $ karşılıkları bu kurla.</p>`;
+
+  /* ---- Teklife göre kâr (sözleşme ₺ vs MK bütçe ₺) ---- */
+  const kar = itKar(sozTLval, malTL);
+  if (kar){
+    h += `<h4 class="mlbas">Teklife göre</h4><div class="mlkl k">
+      ${kpi('Vergi', itTl(kar.vergi) + ' ₺')}
+      ${kpi('KDV Farkı', itTl(kar.kdvFarki) + ' ₺')}
+      ${kpi('Brüt Kar', itTl(kar.brutKar) + ' ₺')}
+      ${kpi('Brüt Kar %', '%' + kar.brutKarPct.toFixed(1))}
+      ${kpi('Net Kar %', '%' + kar.netKarPct.toFixed(1))}
+      ${kpi('Net Kar', itTl(kar.netKar) + ' ₺')}
+    </div>`;
+  }
+  /* ---- Gerçekleşen kâr — gelen faturalara göre ---- */
+  const karG = (sozTLval > 0 && gerTL > 0) ? itKar(sozTLval, gerTL) : null;
+  if (karG){
+    h += `<h4 class="mlbas g">Gerçekleşen · gelen ${fs.length} faturaya göre</h4><div class="mlkl k">
+      ${kpiG('Vergi', itTl(karG.vergi) + ' ₺')}
+      ${kpiG('KDV Farkı', itTl(karG.kdvFarki) + ' ₺')}
+      ${kpiG('Brüt Kar', itTl(karG.brutKar) + ' ₺')}
+      ${kpiG('Brüt Kar %', '%' + karG.brutKarPct.toFixed(1))}
+      ${kpiG('Net Kar %', '%' + karG.netKarPct.toFixed(1))}
+      ${kpiG('Net Kar', itTl(karG.netKar) + ' ₺')}
+    </div>`;
+  }
+
+  /* ---- Gerçekleşen kategori dağılımı ---- */
+  const gcat = {}, gcatFs = {};
+  fs.forEach(f => {
+    const k = String(malFaturaKat(f) || 'Atanmamış');
+    gcat[k] = (gcat[k] || 0) + (+f.tutar_kdvharic || 0);
+    (gcatFs[k] = gcatFs[k] || []).push(f);
+  });
+  const pieTot = Object.keys(gcat).reduce((s, k) => s + (+gcat[k] || 0), 0);
+
+  if (pieTot > 0){
+    const sira = Object.keys(mkB || {}).concat(Object.keys(gcat).filter(k => !mkB || !(k in mkB)));
+    let a0 = -Math.PI / 2, dilim = '', lej = '';
+    sira.forEach(cat => {
+      const v = +gcat[cat] || 0; if (v <= 0) return;
+      const frac = v / pieTot, cc = MAL_RENK[cat] || '#718096';
+      let a1 = a0 + frac * 2 * Math.PI;
+      if (frac > 0.9999) a1 = a0 + 2 * Math.PI - 0.0001;
+      dilim += malArc(a0, a1, cc); a0 = a1;
+      lej += `<div class="mllj"><span class="mlsw" style="background:${cc}"></span>
+        <span class="mlljn">${esc(cat)}</span><b>${itTl(v)} ₺</b>
+        <span class="mlljp">%${(frac * 100).toFixed(1)}</span></div>`;
+    });
+    h += `<div class="mlpasta">
+      <svg viewBox="0 0 200 200">${dilim}<circle cx="100" cy="100" r="50" class="mlph"></circle>
+        <text x="100" y="95" text-anchor="middle" class="mlpt">${malUf(pieTot)} ₺</text>
+        <text x="100" y="112" text-anchor="middle" class="mlpa">gerçekleşen</text></svg>
+      <div class="mllj-l"><div class="mlljb">Gerçekleşen — kategori dağılımı</div>${lej}</div>
+    </div>`;
+  }
+
+  /* ---- Kategori bazlı tamamlanma ---- */
+  if (mkB && Object.keys(mkB).length){
+    h += `<h4 class="mlbas">Kategori bazlı tamamlanma <i>çubuğa dokun → faturalar</i></h4>`;
+    Object.keys(mkB).forEach(cat => {
+      const bud = +mkB[cat] || 0, sp = +gcat[cat] || 0;
+      const pct = bud > 0 ? sp / bud * 100 : 0, cc = MAL_RENK[cat] || '#718096', asti = pct > 100;
+      const acikMi = o.kat === cat;
+      h += `<div class="mlcub" data-act="mal-kat" data-v="${esc(cat)}">
+        <div class="mlcb"><span>${acikMi ? '&#9662;' : '&#9656;'} ${esc(cat)}</span>
+          <span><b class="${asti ? 'ust' : ''}">%${pct.toFixed(1)}</b>
+          <i>${itTl(sp)} / ${itTl(bud)} ₺</i></span></div>
+        <div class="mlbar"><div style="width:${Math.min(pct, 100)}%;background:${asti ? '#C53030' : cc}"></div></div>
+      </div>`;
+      if (acikMi){
+        const cf = gcatFs[cat] || [];
+        h += `<div class="mldet">
+          <div class="mldl"><div>Bütçe<b>${itTl(bud)} ₺</b></div><div>Gerçekleşen<b class="y">${itTl(sp)} ₺</b></div><div>Kalan<b class="${bud - sp < 0 ? 'ust' : ''}">${itTl(bud - sp)} ₺</b></div></div>`;
+        h += cf.length
+          ? '<ul class="mlful">' + cf.map(f => `<li>${esc(f.tedarikci || f.firma || f.gonderen || 'Fatura')}<b>${itTl(f.tutar_kdvharic)} ₺</b></li>`).join('') + '</ul>'
+          : '<p class="mlbos">Henüz harcama yok.</p>';
+        h += '</div>';
+      }
+    });
+    const tp = malTL > 0 ? gerTL / malTL * 100 : 0;
+    h += `<div class="mlcub top">
+      <div class="mlcb"><span>TOPLAM</span><span><b>%${tp.toFixed(1)}</b><i>${itTl(gerTL)} / ${itTl(malTL)} ₺</i></span></div>
+      <div class="mlbar b"><div style="width:${Math.min(tp, 100)}%;background:#1F3864"></div></div></div>`;
+    if (gcat['Atanmamış'] > 0)
+      h += `<p class="mluy">&#9888; ${itTl(gcat['Atanmamış'])} ₺ kategorisi atanmamış fatura var.</p>`;
+  } else {
+    h += `<p class="mluy2">Bu işin MK kategori bütçesi kayıtlı değil — bütçe/gerçekleşen kırılımı çıkarılamıyor.
+      Masaüstü TERM'de işi açıp <b>Bütçe Revize</b> dersen buraya da gelir.</p>`;
+  }
+
+  h += `<div class="itovf"><button class="itbtn gr" data-act="mal-kapat">Kapat</button></div>
+    </div></div></div>`;
+  return h;
 }
 
 function itOverlay(){
@@ -3512,6 +3688,7 @@ function render(){
     : S.tab === 'undated' ? undatedView() : jobsView();
   main.innerHTML += fotoOverlay();      /* fotoğraf penceresi her sekmede açılabilir */
   main.innerHTML += konumOverlay();
+  main.innerHTML += malOverlay();       /* maliyet panosu */
   const mara = document.getElementById('m-ara');
   if (mara){
     let tm = null;
@@ -4095,6 +4272,9 @@ document.addEventListener('click', async (e) => {
   if (a === 'stok-kaydet'){ stokKaydet(); return; }
   if (a === 'foto-panel'){ fotoAc(b.dataset.k, b.dataset.b || ''); return; }
   if (a === 'konum-panel'){ konumAc(b.dataset.k, b.dataset.b || ''); return; }
+  if (a === 'mal-panel'){ malAc(b.dataset.id); return; }
+  if (a === 'mal-kapat'){ malKapat(); return; }
+  if (a === 'mal-kat'){ if (S.malOv){ S.malOv.kat = (S.malOv.kat === b.dataset.v) ? '' : b.dataset.v; render(); } return; }
   if (a === 'konum-kapat'){ konumKapat(); return; }
   if (a === 'konum-gps'){ konumOvGps(); return; }
   if (a === 'konum-kaydet'){ konumKaydet(); return; }

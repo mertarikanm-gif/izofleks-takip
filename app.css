@@ -866,3 +866,108 @@ html,body{overscroll-behavior-x:contain;}
 .knd{font-size:10.5px;color:#7C8DA4;font-weight:600}
 .knhar{margin-left:auto;font-size:12px;font-weight:700;color:#2F5D7C;text-decoration:underline}
 .knhata{font-size:12px;color:#9C3B2A;margin:8px 0 0;line-height:1.45}
+
+/* ═══════════ MALİYET PANOSU (telefon) — masaüstü TERM panosunun karşılığı ═══════════ */
+.itovb.ml{background:#1F3864;}
+.itbtn.ml{display:inline-flex;align-items:center;gap:5px;background:#E8EDF7;color:#1F3864;border:1px solid #BFCCE4;}
+.itbtn.ml svg{width:14px;height:14px;flex:0 0 auto}
+@media (min-width:560px){ .itovk.gen{max-width:620px;} }
+
+.mlkl{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:13px;}
+@media (min-width:430px){ .mlkl{grid-template-columns:repeat(3,1fr);} }
+.mlkl.k{grid-template-columns:repeat(3,1fr);}
+.mlk{background:#F1F5F9;border:1px solid #E2E8F0;border-radius:10px;padding:8px 10px;min-width:0;}
+.mlk>span{display:block;font-size:9.5px;color:#64748b;text-transform:uppercase;letter-spacing:.3px;font-weight:700;}
+.mlk>b{display:block;font-size:13.5px;font-weight:800;color:#1F3864;margin-top:2px;line-height:1.25;
+  word-break:break-word;}
+.mlk u{display:block;font-size:10px;color:#94a3b8;text-decoration:none;font-weight:600;}
+.mlk i{font-size:8.5px;font-style:normal;color:#B7791F;font-weight:800;}
+.mlk.g{background:#F0FDF4;border-color:#BBF7D0;border-left:3px solid #16A34A;}
+.mlk.g>span{color:#15803d;} .mlk.g>b{color:#166534;}
+.mlkur{font-size:10.5px;color:#7C8DA4;margin:-6px 0 13px;line-height:1.4;}
+.mlkur b{color:#1F3864;}
+
+.mlbas{font-size:10.5px;color:#64748b;font-weight:800;text-transform:uppercase;letter-spacing:.3px;
+  margin:0 0 7px;}
+.mlbas.g{color:#15803d;}
+.mlbas i{font-style:normal;font-weight:600;text-transform:none;letter-spacing:0;color:#94a3b8;}
+
+.mlpasta{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 15px;padding:12px;
+  background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;}
+.mlpasta svg{width:148px;height:148px;flex:0 0 auto;margin:0 auto;}
+.mlpt{font:800 14px var(--f-ui,inherit);fill:#1F3864;}
+.mlpa{font:500 10px var(--f-ui,inherit);fill:#94a3b8;}
+.mllj-l{flex:1 1 210px;min-width:0;}
+.mlljb{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.4px;font-weight:800;margin-bottom:7px;}
+.mllj{display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:5px;}
+.mlsw{width:10px;height:10px;border-radius:3px;flex:0 0 auto;}
+.mlljn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mllj b{color:#1a2233;white-space:nowrap;}
+.mlljp{color:#94a3b8;width:42px;text-align:right;flex:0 0 auto;}
+
+.mlcub{margin:0 0 9px;cursor:pointer;}
+.mlcub.top{margin-top:11px;cursor:default;}
+.mlcb{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;margin-bottom:3px;}
+.mlcub.top .mlcb{font-weight:800;color:#1F3864;font-size:12px;}
+.mlcb b{color:#1a2233;} .mlcb b.ust{color:#C53030;}
+.mlcb i{font-style:normal;color:#94a3b8;font-size:10.5px;margin-left:4px;}
+.mlbar{height:11px;background:#eef1f6;border-radius:6px;overflow:hidden;}
+.mlbar.b{height:15px;border-radius:8px;}
+.mlbar>div{height:100%;border-radius:6px;}
+.mldet{margin:-4px 0 11px;padding:10px 12px;background:#F1F5F9;border:1px solid #E2E8F0;border-radius:9px;}
+.mldl{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;line-height:1.35;}
+.mldl>div{color:#64748b;} .mldl b{display:block;color:#1a2233;font-size:12.5px;}
+.mldl b.y{color:#276749;} .mldl b.ust{color:#C53030;}
+.mlful{margin:9px 0 0;padding:0;list-style:none;}
+.mlful li{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;padding:3px 0;
+  border-bottom:1px dashed #E2E8F0;}
+.mlful li b{white-space:nowrap;color:#1F3864;}
+.mlbos{margin:8px 0 0;font-size:11.5px;color:#64748b;}
+.mluy{margin:9px 0 0;font-size:11px;color:#C53030;line-height:1.45;}
+.mluy2{background:#FFF7ED;border:1px solid #FED7AA;color:#9A5A00;border-radius:9px;padding:10px 12px;
+  font-size:11.5px;line-height:1.5;margin:4px 0 0;}
+
+/* Maliyet panosu — koyu tema */
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --ml-kut:#1E252A; --ml-kl:#2A3238; --ml-bas:#9BA7B0; --ml-deg:#CBD6DE;
+  --ml-alt:#78838B; --ml-panel:#1A2126; --ml-iz:#2A3238; --ml-ger:#8FD6AC; --ml-toplam:#6FA8CF;
+}}
+:root[data-theme="dark"]{
+  --ml-kut:#1E252A; --ml-kl:#2A3238; --ml-bas:#9BA7B0; --ml-deg:#CBD6DE;
+  --ml-alt:#78838B; --ml-panel:#1A2126; --ml-iz:#2A3238; --ml-ger:#8FD6AC; --ml-toplam:#6FA8CF;
+}
+:root[data-theme="light"]{
+  --ml-kut:#F1F5F9; --ml-kl:#E2E8F0; --ml-bas:#64748b; --ml-deg:#1F3864;
+  --ml-alt:#94a3b8; --ml-panel:#F8FAFC; --ml-iz:#eef1f6; --ml-ger:#276749; --ml-toplam:#1F3864;
+}
+.mlk{background:var(--ml-kut,#F1F5F9);border-color:var(--ml-kl,#E2E8F0);}
+.mlk>span{color:var(--ml-bas,#64748b);}
+.mlk>b{color:var(--ml-deg,#1F3864);}
+.mlk u{color:var(--ml-alt,#94a3b8);}
+.mlbas{color:var(--ml-bas,#64748b);} .mlbas i{color:var(--ml-alt,#94a3b8);}
+.mlkur{color:var(--ml-alt,#94a3b8);} .mlkur b{color:var(--ml-deg,#1F3864);}
+.mlpasta{background:var(--ml-panel,#F8FAFC);border-color:var(--ml-kl,#E2E8F0);}
+.mlpt{fill:var(--ml-deg,#1F3864);} .mlpa{fill:var(--ml-alt,#94a3b8);}
+.mlph{fill:var(--ml-panel,#F8FAFC);}
+.mlljb{color:var(--ml-bas,#64748b);} .mllj b{color:var(--ink);} .mlljp{color:var(--ml-alt,#94a3b8);}
+.mlcub.top .mlcb{color:var(--ml-deg,#1F3864);}
+.mlcb b{color:var(--ink);} .mlcb i{color:var(--ml-alt,#94a3b8);}
+.mlbar{background:var(--ml-iz,#eef1f6);}
+.mlcub.top .mlbar>div{background:var(--ml-toplam,#1F3864) !important;}
+.mldet{background:var(--ml-kut,#F1F5F9);border-color:var(--ml-kl,#E2E8F0);}
+.mldl>div{color:var(--ml-bas,#64748b);} .mldl b{color:var(--ink);} .mldl b.y{color:var(--ml-ger,#276749);}
+.mlful li{border-bottom-color:var(--ml-kl,#E2E8F0);color:var(--ink);}
+.mlful li b{color:var(--ml-deg,#1F3864);}
+.mlbos{color:var(--ml-bas,#64748b);}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+} :root:not([data-theme="light"]) .itbtn.ml{background:#22303F;color:#A8C4E4;border-color:#3A4A5E;}
+  :root:not([data-theme="light"]) .mlk.g{background:#16261D;border-color:#255739;}
+  :root:not([data-theme="light"]) .mlk.g>span{color:#8FD6AC;} :root:not([data-theme="light"]) .mlk.g>b{color:#A9E6C2;}
+  :root:not([data-theme="light"]) .mlbas.g{color:#8FD6AC;}
+  :root:not([data-theme="light"]) .mluy2{background:#33211C;border-color:#5A3A2A;color:#E8B896;}
+}
+:root[data-theme="dark"] .itbtn.ml{background:#22303F;color:#A8C4E4;border-color:#3A4A5E;}
+:root[data-theme="dark"] .mlk.g{background:#16261D;border-color:#255739;}
+:root[data-theme="dark"] .mlk.g>span{color:#8FD6AC;} :root[data-theme="dark"] .mlk.g>b{color:#A9E6C2;}
+:root[data-theme="dark"] .mlbas.g{color:#8FD6AC;}
+:root[data-theme="dark"] .mluy2{background:#33211C;border-color:#5A3A2A;color:#E8B896;}
