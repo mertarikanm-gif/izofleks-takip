@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.23-faz3b";
+const APP_VERSION = "2026.09.24-foto";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -39,7 +39,8 @@ function rangeLabel(a, b){
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ============ depo: yerel ============ */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'gecmis'];
+/* 'fotoTam' bilerek ABONE OLUNMAZ — tam boyut fotoğraflar sadece bakarken tek belge çekilir */
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'foto', 'fotoTam', 'gecmis'];
 
 function localStore(){
   let data = {};
@@ -57,13 +58,14 @@ function localStore(){
       if (v) Object.assign(v, o); else data[c].push({ id, ...o });
       persist(); emit(c); return Promise.resolve(id); },
     update(c, id, p){ data[c] = data[c].map(r => r.id === id ? { ...r, ...p } : r); persist(); emit(c); return Promise.resolve(); },
-    remove(c, id){ data[c] = data[c].filter(r => r.id !== id); persist(); emit(c); return Promise.resolve(); }
+    remove(c, id){ data[c] = data[c].filter(r => r.id !== id); persist(); emit(c); return Promise.resolve(); },
+    getDoc(c, id){ return Promise.resolve((data[c] || []).find(r => r.id === id) || null); }
   };
 }
 
 /* ============ depo: Firestore ============ */
 function firestoreStore(fs, uid){
-  const { db, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc } = fs;
+  const { db, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc: fsGetDoc } = fs;
   const base = c => collection(db, 'users', uid, c);
   return {
     kind: 'cloud',
@@ -75,7 +77,9 @@ function firestoreStore(fs, uid){
     add(c, o){ const ref = doc(base(c)); return setDoc(ref, o).then(() => ref.id); },
     setId(c, id, o){ return setDoc(doc(db, 'users', uid, c, id), o, { merge: true }).then(() => id); },
     update(c, id, p){ return updateDoc(doc(db, 'users', uid, c, id), p); },
-    remove(c, id){ return deleteDoc(doc(db, 'users', uid, c, id)); }
+    remove(c, id){ return deleteDoc(doc(db, 'users', uid, c, id)); },
+    /* tek belge — tam boyut fotoğraf gibi ağır veriyi abone olmadan çekmek için */
+    getDoc(c, id){ return fsGetDoc(doc(db, 'users', uid, c, id)).then(s => s.exists() ? { id: s.id, ...s.data() } : null); }
   };
 }
 
@@ -85,7 +89,8 @@ const S = {
   gorevTab: 'week',
   weekStart: mondayOf(new Date()),
   view: (() => { try { return localStorage.getItem('izo-view') === 'month' ? 'month' : 'week'; } catch(e){ return 'week'; } })(),
-  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], gecmis: [],
+  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], foto: [], gecmis: [],
+  fotoOv: null,        // açık fotoğraf penceresi: { hedef, baslik, etiket, not, bekle, goster, tam }
   gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
   stk: { firma:'', ara:'', limit:60 },
@@ -298,7 +303,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : jobLabelHtml(j)}<span class="tt">${esc(t.text)}${meta}</span></span>
-    <span class="acts">${t.day ? `<button class="fwd${t.devir ? ' devir' : ''}" data-act="day-fwd" data-id="${t.id}" aria-label="${t.devir ? 'Bitene kadar her gün taşınıyor — kapatmak için basılı tut' : 'Bir gün ileri — bitene kadar taşımak için basılı tut'}" title="${t.devir ? 'Bitene kadar her gün taşınıyor · kapatmak için basılı tut' : 'Dokun: bir gün ileri · Basılı tut: bitene kadar her gün taşı'}">${t.devir ? '\u21BB' : '\u203A'}</button>` : ''}<button class="editb" data-act="task-edit" data-id="${t.id}" aria-label="Düzenle" title="Düzenle">${ICON_EDIT}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
+    <span class="acts">${t.day ? `<button class="fwd${t.devir ? ' devir' : ''}" data-act="day-fwd" data-id="${t.id}" aria-label="${t.devir ? 'Bitene kadar her gün taşınıyor — kapatmak için basılı tut' : 'Bir gün ileri — bitene kadar taşımak için basılı tut'}" title="${t.devir ? 'Bitene kadar her gün taşınıyor · kapatmak için basılı tut' : 'Dokun: bir gün ileri · Basılı tut: bitene kadar her gün taşı'}">${t.devir ? '\u21BB' : '\u203A'}</button>` : ''}<button class="fotob${fotoSayi('gorev:' + t.id) ? ' var' : ''}" data-act="foto-panel" data-k="gorev:${t.id}" data-b="${esc(t.text || '')}" aria-label="Fotoğraf" title="Fotoğraf">&#128247;${fotoSayi('gorev:' + t.id) ? `<i>${fotoSayi('gorev:' + t.id)}</i>` : ''}</button><button class="editb" data-act="task-edit" data-id="${t.id}" aria-label="Düzenle" title="Düzenle">${ICON_EDIT}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
 
@@ -2685,6 +2690,7 @@ function isTakipView(){
           <span class="mtut">${tut}</span></div>
         ${x.teslim ? `<div class="mr-4">Teslim: ${esc(trTarih(x.teslim))}</div>` : ''}
         ${acikMi ? `<div class="itact">
+          <button class="itbtn fo" data-act="foto-panel" data-k="is:${esc(x.is_id)}" data-b="${esc((x.musteri||'') + (x.proje ? ' — ' + x.proje : ''))}">&#128247; Fotoğraf${fotoSayi('is:' + x.is_id) ? ' (' + fotoSayi('is:' + x.is_id) + ')' : ''}</button>
           <button class="itbtn ok" data-act="it-bitir" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Bitir</button>
           <button class="itbtn rd" data-act="it-sil" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Sil</button>
           ${mesgul ? '<span class="itbek">kaydediliyor…</span>' : ''}
@@ -2705,6 +2711,7 @@ function isTakipView(){
         <div class="mr-3"><span class="mno">${esc(t.proje || '')}</span>
           <span class="mtut">${paraYaz(t.tutar_usd, 'USD')}</span></div>
         ${acikMi ? `<div class="itact">
+          <button class="itbtn fo" data-act="foto-panel" data-k="tkf:${esc(t.id)}" data-b="${esc((t.musteri||'') + (t.proje ? ' — ' + t.proje : ''))}">&#128247; Fotoğraf${fotoSayi('tkf:' + t.id) ? ' (' + fotoSayi('tkf:' + t.id) + ')' : ''}</button>
           ${dur === 'HAZIR' ? `<button class="itbtn bl" data-act="it-gonder" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Gönderildi</button>` : ''}
           ${(dur !== 'KABUL' && dur !== 'RED') ? `
             <button class="itbtn ok" data-act="it-kabul" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Kabul</button>
@@ -2733,6 +2740,192 @@ const IT_RED_SEBEP = [
   ['CEVAPSIZ', 'Cevap alınamadı'],
   ['DIGER',    'Diğer']
 ];
+
+/* ═══════════════ FOTOĞRAF (saha / teslim / keşif) ═══════════════
+   NEDEN BÖYLE: Firebase Storage Blaze planı (kredi kartı) istiyor. Ücretsiz planla
+   çalışsın diye fotoğraf çekildiği anda tarayıcıda sıkıştırılıp Firestore'a yazılıyor.
+   Firestore belge sınırı 1 MiB olduğu için iki parça hâlinde durur:
+     foto/<id>     → hafif kayıt: 320 px önizleme + etiket + not + hedef  (abone olunur)
+     fotoTam/<id>  → 1600 px tam boyut (SADECE bakarken tek belge olarak çekilir)
+   Böylece liste anında açılır, veri yalnızca gerektiğinde iner.
+   Hedef biçimi: is:<is_id> | tkf:<teklif id> | gorev:<task id> | stok:<hareket id>
+   (Mert 24.09.2026) */
+const FOTO_ETIKET = [
+  ['kesif',  'Keşif',         '#3F6B8C'],
+  ['once',   'Montaj öncesi', '#8A5A24'],
+  ['montaj', 'Montaj',        '#96702B'],
+  ['teslim', 'Teslim',        '#2F6E52'],
+  ['hasar',  'Hasar / eksik', '#9C3B2A'],
+  ['irsal',  'İrsaliye',      '#5B5FA6'],
+  ['diger',  'Diğer',         '#7B858D']
+];
+const fotoEtiketAd = k => (FOTO_ETIKET.find(e => e[0] === k) || [,'',''])[1];
+const fotoEtiketRenk = k => (FOTO_ETIKET.find(e => e[0] === k) || [,,'#7B858D'])[2];
+
+const FOTO_SINIR = 700 * 1024;        /* base64 üst sınırı — 1 MiB belge sınırına pay bırakır */
+const FOTO_KADEME = [[1600,.72],[1600,.60],[1280,.60],[1024,.55],[800,.50]];
+
+function fotoListe(hedef){
+  return (S.foto || []).filter(f => f.hedef === hedef)
+    .sort((a, b) => (+b.ts || 0) - (+a.ts || 0));
+}
+const fotoSayi = hedef => fotoListe(hedef).length;
+
+/* EXIF dönüklüğü de uygulansın diye önce createImageBitmap, olmazsa <img> */
+async function fotoGoruntu(file){
+  if (window.createImageBitmap){
+    try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch(e){}
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('görüntü açılamadı'));
+      i.src = url;
+    });
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 5000); }
+}
+function fotoCiz(img, maxKenar, kalite){
+  const uzun = Math.max(img.width, img.height);
+  const o = uzun > maxKenar ? maxKenar / uzun : 1;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.width * o));
+  c.height = Math.max(1, Math.round(img.height * o));
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', kalite);
+}
+async function fotoSikistir(file){
+  const img = await fotoGoruntu(file);
+  let tam = '';
+  for (const [kenar, kal] of FOTO_KADEME){
+    tam = fotoCiz(img, kenar, kal);
+    if (tam.length <= FOTO_SINIR) break;
+  }
+  const kucuk = fotoCiz(img, 320, .62);
+  const g = { tam, kucuk, w: img.width, h: img.height };
+  try { img.close && img.close(); } catch(e){}
+  return g;
+}
+
+async function fotoKaydet(hedef, file, etiket, notu){
+  const s = await fotoSikistir(file);
+  if (s.tam.length > 1000 * 1024) throw new Error('fotoğraf çok büyük, sıkıştırılamadı');
+  const id = await S.store.add('fotoTam', { d: s.tam });
+  await S.store.setId('foto', id, {
+    hedef, kucuk: s.kucuk, etiket: etiket || '', not: notu || '',
+    w: s.w, h: s.h, boyut: s.tam.length, ad: String(file.name || ''),
+    ts: Date.now(), cihaz: 'telefon'
+  });
+  return id;
+}
+async function fotoSil(id){
+  await S.store.remove('foto', id);
+  try { await S.store.remove('fotoTam', id); } catch(e){}
+}
+
+/* ---- dosya seçici: her çağrıda yeni input, iOS'ta aynı dosya tekrar seçilebilsin ---- */
+function fotoSec(kamera){
+  return new Promise(res => {
+    const i = document.createElement('input');
+    i.type = 'file'; i.accept = 'image/*'; i.multiple = !kamera;
+    if (kamera) i.capture = 'environment';
+    i.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(i);
+    i.onchange = () => { const f = [...(i.files || [])]; i.remove(); res(f); };
+    i.click();
+  });
+}
+
+function fotoAc(hedef, baslik){
+  S.fotoOv = { hedef, baslik: baslik || '', etiket: '', not: '', bekle: 0, goster: null, tam: null };
+  render();
+}
+function fotoKapat(){ S.fotoOv = null; render(); }
+
+async function fotoYukle(kamera){
+  const o = S.fotoOv; if (!o) return;
+  const dosyalar = await fotoSec(kamera);
+  if (!dosyalar.length) return;
+  const not = (document.getElementById('foto-not') || {}).value || '';
+  o.not = not;
+  o.bekle = dosyalar.length; render();
+  let n = 0, hata = '';
+  for (const f of dosyalar){
+    try { await fotoKaydet(o.hedef, f, o.etiket, not); n++; }
+    catch(e){ hata = e.message || 'kaydedilemedi'; }
+    if (S.fotoOv === o){ o.bekle = dosyalar.length - n; render(); }
+  }
+  if (S.fotoOv === o){ o.bekle = 0; o.not = ''; render(); }
+  if (hata) note('Bazı fotoğraflar eklenemedi: ' + hata);
+  else if (n) note(n + ' fotoğraf eklendi.');
+}
+
+/* Tam boyut sadece bakarken indirilir */
+async function fotoGoster(id){
+  const o = S.fotoOv; if (!o) return;
+  o.goster = id; o.tam = null; render();
+  try {
+    const d = await S.store.getDoc('fotoTam', id);
+    if (S.fotoOv === o && o.goster === id){ o.tam = (d && d.d) || ''; render(); }
+  } catch(e){
+    if (S.fotoOv === o){ o.tam = ''; render(); note('Fotoğraf açılamadı: ' + (e.message || '')); }
+  }
+}
+
+function fotoOverlay(){
+  const o = S.fotoOv;
+  if (!o) return '';
+  const L = fotoListe(o.hedef);
+  if (o.goster){
+    const f = L.find(x => x.id === o.goster) || {};
+    return `<div class="ftov" data-act="foto-buyuk-kapat"><div class="ftbuyuk">
+      ${o.tam === null ? '<div class="ftyuk">yükleniyor…</div>'
+        : o.tam ? `<img src="${o.tam}" alt="">`
+        : '<div class="ftyuk">açılamadı</div>'}
+      <div class="ftbb">
+        ${f.etiket ? `<span class="ftet" style="background:${fotoEtiketRenk(f.etiket)}">${esc(fotoEtiketAd(f.etiket))}</span>` : ''}
+        <span class="ftbt">${esc(fotoGun(f.ts))}</span>
+        ${f.not ? `<span class="ftbn">${esc(f.not)}</span>` : ''}
+        <span style="flex:1"></span>
+        <button class="itbtn rd" data-act="foto-sil" data-id="${esc(f.id || '')}">Sil</button>
+        <button class="itbtn gr" data-act="foto-buyuk-kapat">Kapat</button>
+      </div>
+    </div></div>`;
+  }
+  return `<div class="itov" data-act="foto-kapat"><div class="itovk" data-act="it-ov-ic">
+    <div class="itovb fo">Fotoğraflar${L.length ? ' · ' + L.length : ''}</div>
+    <div class="itovg">
+      ${o.baslik ? `<p class="itovm">${esc(o.baslik)}</p>` : ''}
+      <div class="ftet-l">
+        ${FOTO_ETIKET.map(e => `<button class="ftets${o.etiket === e[0] ? ' on' : ''}" data-act="foto-etiket" data-v="${e[0]}"
+           style="${o.etiket === e[0] ? `background:${e[2]};border-color:${e[2]};color:#fff` : `color:${e[2]};border-color:${e[2]}`}">${e[1]}</button>`).join('')}
+      </div>
+      <label class="itovn">Not (opsiyonel) — yeni eklenen fotoğraflara işlenir
+        <input id="foto-not" type="text" placeholder="ör. 3. kat koridor, cam takıldı" value="${esc(o.not || '')}"></label>
+      <div class="ftbtn-l">
+        <button class="itbtn bl" data-act="foto-cek" ${o.bekle ? 'disabled' : ''}>&#128247; Fotoğraf çek</button>
+        <button class="itbtn gr" data-act="foto-galeri" ${o.bekle ? 'disabled' : ''}>Galeriden seç</button>
+      </div>
+      ${o.bekle ? `<p class="ftyuk2">${o.bekle} fotoğraf işleniyor…</p>` : ''}
+      ${L.length ? `<div class="ftgrid">${L.map(f => `
+        <button class="ftk" data-act="foto-ac" data-id="${esc(f.id)}">
+          <img src="${f.kucuk}" alt="" loading="lazy">
+          ${f.etiket ? `<span class="ftk-e" style="background:${fotoEtiketRenk(f.etiket)}">${esc(fotoEtiketAd(f.etiket))}</span>` : ''}
+          <span class="ftk-t">${esc(fotoGun(f.ts))}</span>
+        </button>`).join('')}</div>`
+        : '<p class="ftbos">Henüz fotoğraf yok. Yukarıdan etiket seç, sonra çek.</p>'}
+      <div class="itovf"><button class="itbtn gr" data-act="foto-kapat">Kapat</button></div>
+    </div></div></div>`;
+}
+function fotoGun(ts){
+  const d = new Date(+ts || 0);
+  if (!(+ts)) return '';
+  return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear();
+}
+
 function itOverlay(){
   const o = S.itOv;
   if (!o) return '';
@@ -2987,6 +3180,7 @@ function stokView(){
             + `<span class="sbek-k">${esc(x.kod || '')}</span>`
             + `<span class="sbek-m">${cik ? '−' : '+'}${(+x.adetEtki || 0)} boy</span>`
             + `<span class="sbek-i">${esc(x.is || '')}</span>`
+            + `<button class="sbek-f${fotoSayi('stok:' + x.id) ? ' var' : ''}" data-act="foto-panel" data-k="stok:${esc(x.id)}" data-b="${esc((x.yon || '') + ' · ' + (x.kod || '') + ' · ' + (x.is || ''))}" title="Fotoğraf">&#128247;${fotoSayi('stok:' + x.id) ? fotoSayi('stok:' + x.id) : ''}</button>`
             + `<button class="sbek-x" data-act="stok-bek-sil" data-id="${esc(x.id)}">&times;</button></div>`;
         }).join('')
       + (bek.length > 10 ? `<div class="sbek-r"><span class="sbek-i">${bek.length - 10} hareket daha…</span></div>` : '')
@@ -3085,6 +3279,7 @@ function render(){
     : S.tab === 'stok' ? stokView()
     : S.tab === 'week' ? (S.view === 'month' && window.innerWidth >= 1000 ? monthView() : weekView())
     : S.tab === 'undated' ? undatedView() : jobsView();
+  main.innerHTML += fotoOverlay();      /* fotoğraf penceresi her sekmede açılabilir */
   const mara = document.getElementById('m-ara');
   if (mara){
     let tm = null;
@@ -3666,6 +3861,27 @@ document.addEventListener('click', async (e) => {
     stokSecenek = null; stokOnayAc(h, r); return;
   }
   if (a === 'stok-kaydet'){ stokKaydet(); return; }
+  if (a === 'foto-panel'){ fotoAc(b.dataset.k, b.dataset.b || ''); return; }
+  if (a === 'foto-kapat'){ fotoKapat(); return; }
+  if (a === 'foto-etiket'){
+    if (S.fotoOv){
+      const nt = document.getElementById('foto-not'); if (nt) S.fotoOv.not = nt.value;
+      S.fotoOv.etiket = (S.fotoOv.etiket === b.dataset.v) ? '' : b.dataset.v;
+      render();
+    }
+    return;
+  }
+  if (a === 'foto-cek'){ fotoYukle(true); return; }
+  if (a === 'foto-galeri'){ fotoYukle(false); return; }
+  if (a === 'foto-ac'){ fotoGoster(id); return; }
+  if (a === 'foto-buyuk-kapat'){ if (S.fotoOv){ S.fotoOv.goster = null; S.fotoOv.tam = null; render(); } return; }
+  if (a === 'foto-sil'){
+    if (!id) return;
+    if (!confirm('Bu fotoğraf silinsin mi?')) return;
+    if (S.fotoOv){ S.fotoOv.goster = null; S.fotoOv.tam = null; }
+    fotoSil(id).then(() => { note('Fotoğraf silindi.'); render(); });
+    return;
+  }
   if (a === 'stok-bek-sil'){
     if (confirm('Bu bekleyen hareket silinsin mi?')) S.store.remove('stokHareket', id);
     return;
@@ -3867,6 +4083,7 @@ function bind(store, label, kind){
   S.unsub.push(store.subscribe('muhasebe', rows => { S.muhasebe = rows; if (S.tab === 'muh') render(); }));
   S.unsub.push(store.subscribe('stok', rows => { S.stok = rows; if (S.tab === 'stok') render(); }));
   S.unsub.push(store.subscribe('stokHareket', rows => { S.stokHareket = rows; if (S.tab === 'stok') render(); }));
+  S.unsub.push(store.subscribe('foto', rows => { S.foto = rows; render(); }));
   S.unsub.push(store.subscribe('gecmis', rows => { S.gecmis = rows; gaDugme(); gaPanelCiz(); }));
 }
 
