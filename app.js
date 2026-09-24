@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-genis";
+const APP_VERSION = "2026.09.24-konumcoz";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2020,17 +2020,55 @@ function tiffGps(v, t){
 }
 
 /* ---- yapıştırılan metinden koordinat çıkar (Maps linki ya da "41.0082, 28.9784") ---- */
+/* Kısaltılmış harita linki — İÇİNDE KOORDİNAT YOKTUR, çözmek için Google'a istek
+   atmak gerekir, tarayıcı da CORS yüzünden buna izin vermez. Bunu ayrıca tanıyıp
+   kullanıcıya ne yapacağını söylüyoruz, sessizce reddetmek yerine. (Mert 24.09.2026) */
+function konumKisaLink(t){
+  return /(?:maps\.app\.goo\.gl|goo\.gl\/maps|g\.co\/kgs|maps\.google\.[a-z.]+\/(?:maps)?\?[^ ]*\bcid=)/i.test(String(t||''));
+}
+
+/* Derece-dakika-saniye: 41°00'29.7"N 28°58'42.1"E  (Google Maps bazen böyle gösterir) */
+function konumDmsCoz(t){
+  const re = /(\d{1,3})\s*°\s*(\d{1,2})\s*['\u2032]\s*([\d.]+)\s*["\u2033]?\s*([NSEWKGDB])/gi;
+  const bul = []; let m;
+  while ((m = re.exec(String(t||''))) && bul.length < 4){
+    let v = (+m[1]) + (+m[2])/60 + (parseFloat(m[3])||0)/3600;
+    const y = m[4].toUpperCase();
+    if (y === 'S' || y === 'W' || y === 'B') v = -v;          /* B = batı */
+    bul.push({ v, eksen: (y==='N'||y==='S'||y==='K'||y==='G') ? 'lat' : 'lon' });
+  }
+  if (bul.length < 2) return null;
+  const la = bul.find(x=>x.eksen==='lat'), lo = bul.find(x=>x.eksen==='lon');
+  if (!la || !lo) return null;
+  return { lat: la.v, lon: lo.v };
+}
+
+/* Yapıştırılan metinden koordinat çıkar. Google Maps'in adres çubuğu linki, "koordinatı
+   kopyala" çıktısı, paylaş metni, DMS ve düz "enlem, boylam" — hepsi kabul edilir. */
 function konumMetinCoz(t){
-  const s = String(t || '');
-  let m = s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)                      /* .../@41.00,28.97,17z */
-       || s.match(/[?&]query=(-?\d+\.\d+)%2C(-?\d+\.\d+)/i)
-       || s.match(/[?&](?:q|query|ll|daddr)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
-       || s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)
-       || s.match(/^\s*(-?\d{1,2}\.\d+)\s*[,;]\s*(-?\d{1,3}\.\d+)\s*$/);
-  if (!m) return null;
-  const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+  const s = decodeURIComponent2(String(t || ''));
+  /* !3d!4d ÖNCE denenir: o, pin'in gerçek koordinatı. @... ise haritanın o anki
+     merkezi — zoom/kaydırma ile kayabiliyor, ikisi aynı linkte farklı çıkabiliyor. */
+  let m = s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)                 /* .../data=...!3d..!4d.. */
+       || s.match(/@(-?\d+\.\d+),\s*(-?\d+\.\d+)/)                 /* .../@41.00,28.97,17z */
+       || s.match(/[?&](?:q|query|ll|sll|daddr|saddr|center|destination|api=1&query)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
+       || s.match(/\/(?:place|dir|search)\/(-?\d+\.\d+),\s*(-?\d+\.\d+)/i)
+       || s.match(/(?:^|[^\d.-])(-?\d{1,2}\.\d{3,})\s*[,;]\s*(-?\d{1,3}\.\d{3,})(?![\d.])/)
+       || s.match(/(?:^|[^\d.-])(-?\d{1,2}\.\d{3,})\s+(-?\d{1,3}\.\d{3,})(?![\d.])/);
+  let lat, lon;
+  if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
+  else {
+    const d = konumDmsCoz(s);
+    if (!d) return null;
+    lat = d.lat; lon = d.lon;
+  }
   if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  if (lat === 0 && lon === 0) return null;
   return { lat, lon };
+}
+/* Link %2C / %40 gibi kaçışlarla gelebiliyor; bozuk kaçışta ham metne dön */
+function decodeURIComponent2(s){
+  try { return decodeURIComponent(s.replace(/\+/g, ' ')); } catch(e){ return s; }
 }
 
 /* ---- pencere ---- */
@@ -2058,7 +2096,12 @@ async function konumKaydet(){
   const o = S.konumOv; if (!o) return;
   const c = o.metin.trim() ? konumMetinCoz(o.metin) : null;
   if (o.metin.trim() && !c){
-    o.hata = 'Koordinat okunamadı. Google Maps linki ya da "41.0082, 28.9784" biçiminde yaz.';
+    o.hata = konumKisaLink(o.metin)
+      ? 'Bu kısaltılmış bir paylaşım linki (maps.app.goo.gl) — içinde koordinat yok, uygulama açamaz. '
+        + 'Google Maps\'te yere basılı tut, üstte çıkan koordinata dokun (panoya kopyalanır), onu yapıştır. '
+        + 'Ya da şantiyedeysen "Şu an buradayım" düğmesini kullan.'
+      : 'Koordinat okunamadı. Maps\'in adres çubuğundaki uzun link, "41.0082, 28.9784" ya da '
+        + '41°00\'29.7"N 28°58\'42.1"E biçimi çalışır.';
     render(); return;
   }
   const eski = konumAl(o.hedef) || {};
