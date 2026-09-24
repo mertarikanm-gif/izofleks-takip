@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-malpano";
+const APP_VERSION = "2026.09.24-muhara";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -2768,17 +2768,26 @@ function muhGun(iso){
   const p = String(iso).split('-');
   return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : iso;
 }
+/* Muhasebe araması — ESKİDEN düz indexOf'tu: "gokay" yazınca "GÖKAY KORKMAZ" bulunmuyor,
+   kelime sırası da bağlayıcıydı. Artık depo aramasıyla aynı sadeleştirme (ı→i, ö→o, ş→s…),
+   kelime sırası önemsiz, fatura no gibi kodlar için boşluksuz hâli de denenir.
+   Sayılar burada TAM eşleşme aranmaz (depodan farkı): fatura numarasının bir parçasını
+   yazabilelim diye. (Mert 24.09.2026) */
+function muhAraUyar(alanlar, q){
+  const hep = alanlar.filter(Boolean).join(' ');
+  const sade = araSade(hep), sik = araSik(hep);
+  const kel = araSade(q).split(' ').filter(Boolean);
+  if (!kel.length) return true;
+  return kel.every(k => sade.indexOf(k) >= 0 || sik.indexOf(k) >= 0);
+}
 function muhSuz(){
-  const q = (S.muh.ara || '').trim().toLocaleLowerCase('tr');
+  const q = (S.muh.ara || '').trim();
   return muhListe().filter(r => {
     if (S.muh.yon && r.y !== S.muh.yon) return false;
     if (S.muh.odeme === 'odendi' && !(r.d === 'o' || r.d === 't')) return false;
     if (S.muh.odeme === 'oneri'  && r.d !== 'n') return false;
     if (S.muh.odeme === 'acik'   && r.d) return false;
-    if (q){
-      const h = [r.k, r.n, r.pr].join(' ').toLocaleLowerCase('tr');
-      if (h.indexOf(q) < 0) return false;
-    }
+    if (q && !muhAraUyar([r.k, r.n, r.pr], q)) return false;
     return true;
   });
 }
