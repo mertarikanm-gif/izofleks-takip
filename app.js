@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-foto";
+const APP_VERSION = "2026.09.24-foto2";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -275,6 +275,10 @@ const ICON_PIN = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" 
   <path d="M11.8 2.6 17.4 8.2l-2.3.7a2 2 0 0 0-1 .6l-2.4 2.8-3.9-3.9 2.8-2.4a2 2 0 0 0 .6-1z"/>
   <path d="M7.8 12.2 3.4 16.6"/></svg>`;
 
+/* Kamera — ICON_EDIT/ICON_COPY ile aynı çizgi stili (emoji kart içinde yamalı duruyordu) */
+const ICON_CAM = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 7.2h2.6L7 5.2h6l1.4 2H17a1 1 0 0 1 1 1v6.3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8.2a1 1 0 0 1 1-1z"/>
+  <circle cx="10" cy="11.3" r="2.7"/></svg>`;
 const ICON_COPY = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5">
   <rect x="7" y="7" width="8.5" height="8.5" rx="2"/>
   <path d="M12.5 4.5H6a1.5 1.5 0 0 0-1.5 1.5v6.5"/></svg>`;
@@ -303,7 +307,7 @@ function taskHtml(t, o = {}){
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6.2L4.4 9 10.5 2.8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <span class="body">${o.hideJob ? '' : jobLabelHtml(j)}<span class="tt">${esc(t.text)}${meta}</span></span>
-    <span class="acts">${t.day ? `<button class="fwd${t.devir ? ' devir' : ''}" data-act="day-fwd" data-id="${t.id}" aria-label="${t.devir ? 'Bitene kadar her gün taşınıyor — kapatmak için basılı tut' : 'Bir gün ileri — bitene kadar taşımak için basılı tut'}" title="${t.devir ? 'Bitene kadar her gün taşınıyor · kapatmak için basılı tut' : 'Dokun: bir gün ileri · Basılı tut: bitene kadar her gün taşı'}">${t.devir ? '\u21BB' : '\u203A'}</button>` : ''}<button class="fotob${fotoSayi('gorev:' + t.id) ? ' var' : ''}" data-act="foto-panel" data-k="gorev:${t.id}" data-b="${esc(t.text || '')}" aria-label="Fotoğraf" title="Fotoğraf">&#128247;${fotoSayi('gorev:' + t.id) ? `<i>${fotoSayi('gorev:' + t.id)}</i>` : ''}</button><button class="editb" data-act="task-edit" data-id="${t.id}" aria-label="Düzenle" title="Düzenle">${ICON_EDIT}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
+    <span class="acts">${t.day ? `<button class="fwd${t.devir ? ' devir' : ''}" data-act="day-fwd" data-id="${t.id}" aria-label="${t.devir ? 'Bitene kadar her gün taşınıyor — kapatmak için basılı tut' : 'Bir gün ileri — bitene kadar taşımak için basılı tut'}" title="${t.devir ? 'Bitene kadar her gün taşınıyor · kapatmak için basılı tut' : 'Dokun: bir gün ileri · Basılı tut: bitene kadar her gün taşı'}">${t.devir ? '\u21BB' : '\u203A'}</button>` : ''}<button class="fotob${fotoSayi('gorev:' + t.id) ? ' var' : ''}" data-act="foto-panel" data-k="gorev:${t.id}" data-b="${esc(t.text || '')}" aria-label="Fotoğraf" title="Fotoğraf">${ICON_CAM}${fotoSayi('gorev:' + t.id) ? `<i>${fotoSayi('gorev:' + t.id)}</i>` : ''}</button><button class="editb" data-act="task-edit" data-id="${t.id}" aria-label="Düzenle" title="Düzenle">${ICON_EDIT}</button><button class="dup" data-act="dup-task" data-id="${t.id}" aria-label="Görevi çoğalt" title="Çoğalt">${ICON_COPY}</button><button class="kill" data-act="del-task" data-id="${t.id}" aria-label="Görevi sil" title="Sil">×</button></span>
   </div>`;
 }
 
@@ -2690,7 +2694,7 @@ function isTakipView(){
           <span class="mtut">${tut}</span></div>
         ${x.teslim ? `<div class="mr-4">Teslim: ${esc(trTarih(x.teslim))}</div>` : ''}
         ${acikMi ? `<div class="itact">
-          <button class="itbtn fo" data-act="foto-panel" data-k="is:${esc(x.is_id)}" data-b="${esc((x.musteri||'') + (x.proje ? ' — ' + x.proje : ''))}">&#128247; Fotoğraf${fotoSayi('is:' + x.is_id) ? ' (' + fotoSayi('is:' + x.is_id) + ')' : ''}</button>
+          <button class="itbtn fo" data-act="foto-panel" data-k="is:${esc(x.is_id)}" data-b="${esc((x.musteri||'') + (x.proje ? ' — ' + x.proje : ''))}">${ICON_CAM}Fotoğraf${fotoSayi('is:' + x.is_id) ? ' (' + fotoSayi('is:' + x.is_id) + ')' : ''}</button>
           <button class="itbtn ok" data-act="it-bitir" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Bitir</button>
           <button class="itbtn rd" data-act="it-sil" data-id="${esc(x.is_id)}" ${mesgul ? 'disabled' : ''}>Sil</button>
           ${mesgul ? '<span class="itbek">kaydediliyor…</span>' : ''}
@@ -2711,7 +2715,7 @@ function isTakipView(){
         <div class="mr-3"><span class="mno">${esc(t.proje || '')}</span>
           <span class="mtut">${paraYaz(t.tutar_usd, 'USD')}</span></div>
         ${acikMi ? `<div class="itact">
-          <button class="itbtn fo" data-act="foto-panel" data-k="tkf:${esc(t.id)}" data-b="${esc((t.musteri||'') + (t.proje ? ' — ' + t.proje : ''))}">&#128247; Fotoğraf${fotoSayi('tkf:' + t.id) ? ' (' + fotoSayi('tkf:' + t.id) + ')' : ''}</button>
+          <button class="itbtn fo" data-act="foto-panel" data-k="tkf:${esc(t.id)}" data-b="${esc((t.musteri||'') + (t.proje ? ' — ' + t.proje : ''))}">${ICON_CAM}Fotoğraf${fotoSayi('tkf:' + t.id) ? ' (' + fotoSayi('tkf:' + t.id) + ')' : ''}</button>
           ${dur === 'HAZIR' ? `<button class="itbtn bl" data-act="it-gonder" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Gönderildi</button>` : ''}
           ${(dur !== 'KABUL' && dur !== 'RED') ? `
             <button class="itbtn ok" data-act="it-kabul" data-id="${esc(t.id)}" ${mesgul ? 'disabled' : ''}>Kabul</button>
@@ -2906,7 +2910,7 @@ function fotoOverlay(){
       <label class="itovn">Not (opsiyonel) — yeni eklenen fotoğraflara işlenir
         <input id="foto-not" type="text" placeholder="ör. 3. kat koridor, cam takıldı" value="${esc(o.not || '')}"></label>
       <div class="ftbtn-l">
-        <button class="itbtn bl" data-act="foto-cek" ${o.bekle ? 'disabled' : ''}>&#128247; Fotoğraf çek</button>
+        <button class="itbtn bl" data-act="foto-cek" ${o.bekle ? 'disabled' : ''}>${ICON_CAM}Fotoğraf çek</button>
         <button class="itbtn gr" data-act="foto-galeri" ${o.bekle ? 'disabled' : ''}>Galeriden seç</button>
       </div>
       ${o.bekle ? `<p class="ftyuk2">${o.bekle} fotoğraf işleniyor…</p>` : ''}
@@ -3180,7 +3184,7 @@ function stokView(){
             + `<span class="sbek-k">${esc(x.kod || '')}</span>`
             + `<span class="sbek-m">${cik ? '−' : '+'}${(+x.adetEtki || 0)} boy</span>`
             + `<span class="sbek-i">${esc(x.is || '')}</span>`
-            + `<button class="sbek-f${fotoSayi('stok:' + x.id) ? ' var' : ''}" data-act="foto-panel" data-k="stok:${esc(x.id)}" data-b="${esc((x.yon || '') + ' · ' + (x.kod || '') + ' · ' + (x.is || ''))}" title="Fotoğraf">&#128247;${fotoSayi('stok:' + x.id) ? fotoSayi('stok:' + x.id) : ''}</button>`
+            + `<button class="sbek-f${fotoSayi('stok:' + x.id) ? ' var' : ''}" data-act="foto-panel" data-k="stok:${esc(x.id)}" data-b="${esc((x.yon || '') + ' · ' + (x.kod || '') + ' · ' + (x.is || ''))}" title="Fotoğraf">${ICON_CAM}${fotoSayi('stok:' + x.id) ? `<i>${fotoSayi('stok:' + x.id)}</i>` : ''}</button>`
             + `<button class="sbek-x" data-act="stok-bek-sil" data-id="${esc(x.id)}">&times;</button></div>`;
         }).join('')
       + (bek.length > 10 ? `<div class="sbek-r"><span class="sbek-i">${bek.length - 10} hareket daha…</span></div>` : '')

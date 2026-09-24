@@ -845,3 +845,12 @@ html,body{overscroll-behavior-x:contain;}
 .sbek-f{flex:0 0 auto;border:none;background:none;color:#b0891f;font-size:12px;
   line-height:1;padding:0 3px;cursor:pointer;font-weight:800}
 .sbek-f.var{color:#3F6B8C}
+
+/* Kamera ikonu — metinli düğmelerde ve kart ikonlarında ortak hizalama */
+.itbtn svg,.fotob svg,.sbek-f svg{width:15px;height:15px;vertical-align:-3px;flex:0 0 auto}
+.itbtn.fo,.itbtn.bl{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.task .fotob{display:inline-flex;align-items:center;gap:1px}
+.task .fotob svg{width:15px;height:15px}
+.sbek-f{display:inline-flex;align-items:center;gap:1px}
+.sbek-f svg{width:13px;height:13px}
+.sbek-f i{font-style:normal;font-size:9px;font-weight:800;vertical-align:super}

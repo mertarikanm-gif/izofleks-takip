@@ -2,7 +2,7 @@
    Uygulama kabuğunu önbelleğe alır: internet yokken de açılır.
    Veri senkronu Firestore'un kendi çevrimdışı önbelleğiyle çalışır. */
 
-const CACHE = 'izo-takip-v72';
+const CACHE = 'izo-takip-v73';
 const SHELL = [
   './',
   './index.html',
