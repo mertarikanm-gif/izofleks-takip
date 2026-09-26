@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.26-kalem";
+const APP_VERSION = "2026.09.26-alfabe";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -3845,11 +3845,13 @@ function stokListe(){
 }
 function stokSuz(){
   const q = (S.stk.ara || '').trim();
+  /* Ürün koduna göre ALFABETİK sıra (Mert 26.09.2026) — Türkçe harf sırası + sayılar
+     sayısal karşılaştırılır, böylece B11-2 < B11-10 olur. */
   return stokListe().filter(r => {
     if (S.stk.firma && r.f !== S.stk.firma) return false;
     if (q && !araUyar(stokAlanlar(r), q)) return false;   /* sesli komutla aynı eşleştirme */
     return true;
-  });
+  }).sort((a, b) => String(a.k || '').localeCompare(String(b.k || ''), 'tr', { numeric: true, sensitivity: 'base' }));
 }
 function stokView(){
   const meta = S.stok.find(x => x.id === 'meta');
