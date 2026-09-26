@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.24-knipuc";
+const APP_VERSION = "2026.09.26-kalem";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -40,7 +40,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp
 
 /* ============ depo: yerel ============ */
 /* 'fotoTam' bilerek ABONE OLUNMAZ — tam boyut fotoğraflar sadece bakarken tek belge çekilir */
-const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'foto', 'fotoTam', 'konum', 'odemeOnay', 'gecmis'];
+const COLLECTIONS = ['jobs', 'tasks', 'contacts', 'settings', 'muhasebe', 'stok', 'stokHareket', 'stokKalem', 'foto', 'fotoTam', 'konum', 'odemeOnay', 'gecmis'];
 
 function localStore(){
   let data = {};
@@ -89,7 +89,7 @@ const S = {
   gorevTab: 'week',
   weekStart: mondayOf(new Date()),
   view: (() => { try { return localStorage.getItem('izo-view') === 'month' ? 'month' : 'week'; } catch(e){ return 'week'; } })(),
-  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], foto: [], gecmis: [],
+  jobs: [], tasks: [], contacts: [], settings: [], muhasebe: [], stok: [], stokHareket: [], stokKalem: [], foto: [], gecmis: [],
   fotoOv: null,        // açık fotoğraf penceresi: { hedef, baslik, etiket, not, bekle, goster, tam }
   konum: [], konumOv: null,   // şantiye konumları + açık konum penceresi
   odemeOnay: [],       // elle 'ödendi' işaretleri (masaüstü ile ortak)
@@ -1330,10 +1330,11 @@ async function komutCoz(metin){
     'Şema:',
     '{"islem":"ekle"|"tasi"|"sil"|"bitti"|"geri-al"|"sabitle"|"sabit-kaldir"|"duzenle"|"is-degistir"',
     '        |"is-bitir"|"is-sil"|"teklif-gonderildi"|"teklif-red"|"teklif-kabul"',
-    '        |"stok-giris"|"stok-cikis"|"ekran"|"sorgu"|"anlasilmadi",',
+    '        |"stok-giris"|"stok-cikis"|"stok-kalem-ac"|"stok-kalem-sil"|"ekran"|"sorgu"|"anlasilmadi",',
     ' "isId":string|null,"gorevId":string|null,"gun":"YYYY-MM-DD"|null,"sabit":true|false,',
     ' "metin":string|null,"hedef":string|null,"konu":string|null,"arama":string|null,"sebep":string|null,',
     ' "stokKod":string|null,"stokMiktar":number|null,"stokBirim":"boy"|"adet"|"m"|"kg"|null,"stokFirma":"izofleks"|"tars"|null,',
+    ' "kalemCins":string|null,"kalemDetay":string|null,"kalemEbat":string|null,"kalemRenk":string|null,"kalemBoy":number|null,"kalemKgm":number|null,',
     ' "guven":0..1,"soru":string|null}',
     '',
     'İŞLEMLER:',
@@ -1371,6 +1372,15 @@ async function komutCoz(metin){
     '    stokMiktar = sayı. stokBirim = boy | adet | m | kg (söylenmediyse "boy").',
     '    stokFirma = izofleks | tars (söylenmediyse null). metin = iş/müşteri ya da kısa not.',
     '    DİKKAT: "kaç boy var", "ne kadar kaldı" gibi SORULAR stok hareketi DEĞİL — onlar sorgu.',
+    '',
+    'DEPO KALEMİ AÇMA / SİLME (stok LİSTESİNİ değiştirir — hareket değil):',
+    '- stok-kalem-ac: depoda OLMAYAN yeni bir ürün kartı aç ("yeni kalem aç B11-2 RAL 7016 6 metre boy",',
+    '    "depoya yeni ürün ekle", "stokta yok, yeni kalem oluştur").',
+    '    stokKod = yeni ürün kodu (ZORUNLU). kalemCins = ürün cinsi. kalemDetay = iç/dış vb.',
+    '    kalemEbat = kesit ("76*9"). kalemRenk = RAL/kartela. kalemBoy = boy metre (sayı). kalemKgm = kg/m (sayı).',
+    '    stokMiktar = açılış adedi (söylenmediyse 0). stokFirma = izofleks | tars (söylenmediyse null).',
+    '- stok-kalem-sil: bir ürün kartını depodan TAMAMEN kaldır ("B11-9 kalemini sil", "stok kartını kaldır").',
+    '    stokKod zorunlu. DİKKAT: "20 boy çıkış yap" DEĞİL — o stok-cikis.',
     '',
     'EKRAN VE SORGU:',
     '- ekran: sadece ekran aç ("stok aç", "iş takibe geç", "muhasebeyi göster"). hedef = gorevler|istakip|stok|muhasebe.',
@@ -1441,7 +1451,8 @@ const SERBEST_ISLEM = ['ekran','sorgu'];
 Object.assign(ISLEM_AD, {
   'is-bitir':'İşi bitir', 'is-sil':'İşi sil', 'teklif-gonderildi':'Gönderildi işaretle',
   'teklif-red':'Teklifi reddet', 'teklif-kabul':'Teklifi kabul et', 'ekran':'Ekranı aç', 'sorgu':'Sorgula',
-  'stok-giris':'Depoya giriş', 'stok-cikis':'Depodan çıkış'
+  'stok-giris':'Depoya giriş', 'stok-cikis':'Depodan çıkış',
+  'stok-kalem-ac':'Yeni depo kalemi', 'stok-kalem-sil':'Depo kalemini sil'
 });
 const EKRAN_AD = { gorevler:'Görevler', istakip:'İş Takip', stok:'Stok', muhasebe:'Muhasebe' };
 const EKRAN_TAB = { gorevler:'home', istakip:'istakip', stok:'stok', muhasebe:'muh' };
@@ -1480,6 +1491,8 @@ function komutSonuc(veri, ham){
     if (ger) o.gorevId = ger;
   }
   if (STOK_ISLEM.includes(islem)){ komutStok(o, islem); return; }   /* kendi onay akışı */
+  if (islem === 'stok-kalem-ac'){  komutKalemAc(o);  return; }
+  if (islem === 'stok-kalem-sil'){ komutKalemSil(o); return; }
   const gecerli = (islem === 'ekle' && o.isId && o.metin)
                || (islem === 'is-degistir' && o.isId && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
                || (HEDEF_ISLEM.includes(islem) && islem !== 'is-degistir' && o.gorevId && S.tasks.some(t => t.id === o.gorevId))
@@ -2161,6 +2174,8 @@ function konumOverlay(){
 
 /* ============ FAZ 3: sesle depo hareketi (masaüstü TERM ile aynı) ============ */
 const STOK_ISLEM = ['stok-giris', 'stok-cikis'];
+const STOK_KALEM_ISLEM = ['stok-kalem-ac', 'stok-kalem-sil'];
+let kalemBek = null;
 let stokSecenek = null, stokBekKomut = null;
 
 /* Söylenen ürün tarifini depo kaydına eşle */
@@ -2210,9 +2225,12 @@ function komutStok(o, islem){
     ekranKilitle();
     vSet('Kalem bulunamadı', V.metin);
     document.getElementById('v-body').innerHTML =
-      `<p class="vq">“${esc(String(o.stokKod || ''))}” depoda bulunamadı. Ürün kodunu söyler misin?</p>` + yazDuzeltHtml(V.metin);
+      `<p class="vq">“${esc(String(o.stokKod || ''))}” depoda bulunamadı. Ürün kodunu söyler misin —`
+      + ' ya da bu kodu yeni kalem olarak açalım mı?</p>' + yazDuzeltHtml(V.metin);
+    kalemBek = { tip: 'teklif', o };
     document.getElementById('v-acts').innerHTML =
       '<button class="btn primary" data-act="voice-cevap">&#127908; Tekrar söyle</button>' +
+      '<button class="btn" data-act="kalem-ac-teklif">&#10133; Yeni kalem aç</button>' +
       '<button class="btn ghost" data-act="voice-close">Kapat</button>';
     return;
   }
@@ -2289,6 +2307,138 @@ async function stokKaydet(){
   S.tab = 'stok'; render();
   noteGeri(`${h.yon === 'Çıkış' ? 'Çıkış' : 'Giriş'} kaydedildi — ${r.k} ${b.adet} boy (bekleyen)`,
            () => S.store.remove('stokHareket', id));
+}
+
+/* ============ FAZ 3b — DEPO KALEMİ AÇMA / SİLME ============ */
+function kalemNorm(o){
+  const firma = (o.stokFirma === 'tars') ? 'tars' : 'izofleks';
+  const kod = String(o.stokKod || '').trim().toLocaleUpperCase('tr').replace(/\s+/g, ' ');
+  const boy = +o.kalemBoy || 0, kgm = +o.kalemKgm || 0, adet = +o.stokMiktar || 0;
+  return { firma, kod,
+    cins: String(o.kalemCins || '').trim(), detay: String(o.kalemDetay || '').trim(),
+    ebat: String(o.kalemEbat || '').trim(), renk: String(o.kalemRenk || '').trim(),
+    boy, kgm, adet,
+    toplamkg: (kgm > 0 && boy > 0) ? Math.round(adet * boy * kgm * 10) / 10 : 0 };
+}
+function komutKalemAc(o){
+  const k = kalemNorm(o);
+  ekranKilitle();
+  if (!k.kod){
+    vSet('Kod gerekli', V.metin);
+    document.getElementById('v-body').innerHTML =
+      '<p class="vq">Yeni kalemin ürün kodunu söyler misin?</p>' + yazDuzeltHtml(V.metin);
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="voice-cevap">&#127908; Tekrar söyle</button>' +
+      '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  const sik = araSik(k.kod);
+  const mevcut = stokListe().filter(r => r.f === k.firma && araSik(r.k || '') === sik)[0];
+  if (mevcut){
+    kalemBek = null;
+    vSet('Bu kalem zaten var', V.metin);
+    document.getElementById('v-body').innerHTML =
+      `<p class="vq">“${esc(k.kod)}” ${k.firma === 'tars' ? 'TARS' : 'İZOFLEKS'} deposunda zaten kayıtlı `
+      + `(${esc(stokAdi(mevcut))} · ${(+mevcut.a || 0)} boy). Miktar değişecekse giriş/çıkış komutu kullan.</p>`;
+    document.getElementById('v-acts').innerHTML = '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  const sat = (e, v, renk) => `<div><span>${e}</span><b${renk ? ` style="color:${renk}"` : ''}>${esc(v === '' || v == null ? '—' : v)}</b></div>`;
+  kalemBek = { tip: 'yeni', k };
+  vSet('Yeni kalem — onay bekliyor', V.metin);
+  document.getElementById('v-body').innerHTML = '<div class="vsum">'
+    + sat('İŞLEM', 'YENİ DEPO KALEMİ', '#2F6E52')
+    + sat('KOD', k.kod) + sat('FİRMA', k.firma === 'tars' ? 'TARS' : 'İZOFLEKS')
+    + sat('CİNS', k.cins) + sat('DETAY', k.detay)
+    + sat('KESİT EBAT', k.ebat) + sat('RENK', k.renk)
+    + sat('BOY', k.boy > 0 ? k.boy + ' m' : '') + sat('KG/M', k.kgm > 0 ? k.kgm : '')
+    + sat('AÇILIŞ ADEDİ', k.adet + ' boy')
+    + (k.toplamkg > 0 ? sat('TOPLAM KG', k.toplamkg) : '')
+    + '</div>'
+    + ((!k.cins || !k.boy) ? '<p class="vq" style="color:#9C3B2A">Cins ya da boy boş — Excel\'e işlerken tamamlaman gerekir.</p>' : '')
+    + '<p class="vq">Kalem bekleyen listeye düşer; depoda hemen görünür.</p>';
+  document.getElementById('v-acts').innerHTML =
+    '<button class="btn primary" data-act="kalem-kaydet">Kalemi aç</button>' +
+    '<button class="btn" data-act="voice-cevap">&#127908; Cevapla</button>' +
+    '<button class="btn ghost" data-act="voice-close">İptal</button>';
+}
+function komutKalemSil(o){
+  const firma = (o.stokFirma === 'tars' || o.stokFirma === 'izofleks') ? o.stokFirma : '';
+  let aday = stokCoz(o.stokKod, firma);
+  if (!aday.length && firma) aday = stokCoz(o.stokKod, '');
+  ekranKilitle();
+  if (!aday.length){
+    kalemBek = null;
+    vSet('Kalem bulunamadı', V.metin);
+    document.getElementById('v-body').innerHTML =
+      `<p class="vq">“${esc(String(o.stokKod || ''))}” depoda yok — silinecek bir şey bulamadım.</p>` + yazDuzeltHtml(V.metin);
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn primary" data-act="voice-cevap">&#127908; Tekrar söyle</button>' +
+      '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  if (aday.length > 1){
+    stokSecenek = { aday, o, islem: 'stok-kalem-sil' };
+    vSet('Hangi kalem silinsin?', V.metin);
+    document.getElementById('v-body').innerHTML = '<div class="vsum">'
+      + aday.slice(0, 8).map((r, i) =>
+          `<div data-act="kalem-sil-sec" data-i="${i}" style="cursor:pointer"><span>${i + 1}</span>`
+          + `<b>${esc(r.k)}</b><i>${esc([r.r, r.e].filter(Boolean).join(' · ') + ' · ' + (r.f === 'tars' ? 'TARS' : 'İZO'))}</i></div>`).join('')
+      + '</div>';
+    document.getElementById('v-acts').innerHTML =
+      '<button class="btn" data-act="voice-cevap">&#127908; Tarif et</button>' +
+      '<button class="btn ghost" data-act="voice-close">Kapat</button>';
+    return;
+  }
+  kalemSilAc(aday[0]);
+}
+function kalemSilAc(r){
+  kalemBek = { tip: 'sil', r };
+  ekranKilitle();
+  const sat = (e, v) => `<div><span>${e}</span><b>${esc(v === '' || v == null ? '—' : v)}</b></div>`;
+  vSet('Silme onayı', V.metin);
+  document.getElementById('v-body').innerHTML = '<div class="vsum">'
+    + '<div><span>İŞLEM</span><b style="color:#9C3B2A">KALEMİ TAMAMEN SİL</b></div>'
+    + sat('KOD', r.k) + sat('FİRMA', r.f === 'tars' ? 'TARS' : 'İZOFLEKS')
+    + sat('CİNS', [r.c, r.d].filter(Boolean).join(' · '))
+    + sat('RENK / EBAT', [r.r, r.e].filter(Boolean).join(' · '))
+    + sat('MEVCUT BAKİYE', (+r.a || 0) + ' boy')
+    + '</div>'
+    + ((+r.a || 0) !== 0 ? `<p class="vq" style="color:#9C3B2A">Dikkat: bakiyesi ${(+r.a || 0)} boy. Silersen bu stok kayıttan düşer.</p>` : '')
+    + '<p class="vq">Excel\'e işlenene kadar geri alabilirsin.</p>';
+  document.getElementById('v-acts').innerHTML =
+    '<button class="btn primary tehlike" data-act="kalem-sil">Kalemi sil</button>' +
+    '<button class="btn ghost" data-act="voice-close">Vazgeç</button>';
+}
+async function kalemKaydet(){
+  const b = kalemBek; if (!b || b.tip !== 'yeni') return;
+  kalemBek = null;
+  const k = b.k, d = new Date();
+  const kayit = { tip: 'yeni',
+    tarih: ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear(),
+    firma: k.firma, kod: k.kod, cins: k.cins, detay: k.detay, ebat: k.ebat, renk: k.renk,
+    boy: k.boy, kgm: k.kgm, adet: k.adet, toplamkg: k.toplamkg, 'not': '',
+    islendi: false, kaynak: 'ses', cihaz: 'telefon',
+    ts: Date.now(), metin: String(V.metin || '') };
+  voiceKapat();
+  const id = await S.store.add('stokKalem', kayit);
+  S.tab = 'stok'; render();
+  noteGeri(`Yeni kalem açıldı — ${k.kod} (bekleyen)`, () => S.store.remove('stokKalem', id));
+}
+async function kalemSil(){
+  const b = kalemBek; if (!b || b.tip !== 'sil') return;
+  kalemBek = null;
+  const r = b.r, d = new Date();
+  const kayit = { tip: 'sil',
+    tarih: ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear(),
+    firma: r.f || '', kod: r.k, cins: r.c || '', detay: r.d || '', ebat: r.e || '', renk: r.r || '',
+    boy: +r.b || 0, adet: +r.a || 0,
+    islendi: false, kaynak: 'ses', cihaz: 'telefon',
+    ts: Date.now(), metin: String(V.metin || '') };
+  voiceKapat();
+  const id = await S.store.add('stokKalem', kayit);
+  S.tab = 'stok'; render();
+  noteGeri(`Kalem silindi — ${r.k} (geri alınabilir)`, () => S.store.remove('stokKalem', id));
 }
 
 /* ============ İŞ TAKİP KAYDI — iş bitir/sil, teklif durumu ============ */
@@ -3659,10 +3809,31 @@ function stokDelta(){
   });
   return d;
 }
+/* FAZ 3b: bekleyen KALEM işlemleri — yeni kalem / kalem silme */
+function stokKalemBekleyen(){
+  const d = stokDamga();
+  return (S.stokKalem || []).filter(k => !k.islendi && (+k.ts || 0) > d)
+    .sort((a, b) => (+b.ts || 0) - (+a.ts || 0));
+}
+function stokKalemUygula(L){
+  const K = stokKalemBekleyen();
+  if (!K.length) return L;
+  const sil = {}, yeni = [];
+  K.forEach(k => { if (k.tip === 'sil') sil[k.firma + '|' + k.kod] = k; else yeni.push(k); });
+  let out = L.filter(r => !sil[(r.f || '') + '|' + (r.k || '')]);
+  yeni.forEach(k => {
+    if (out.some(r => r.f === k.firma && r.k === k.kod)) return;
+    out.push({ f: k.firma, k: k.kod, c: k.cins || '', d: k.detay || '', e: k.ebat || '',
+               r: k.renk || '', b: +k.boy || 0, a: +k.adet || 0, kg: +k.toplamkg || 0,
+               n: k['not'] || '', yeni: true });
+  });
+  return out;
+}
 function stokListe(){
+  const ham = stokKalemUygula(stokHam());
   const d = stokDelta(), bos = !Object.keys(d).length;
-  if (bos) return stokHam();
-  return stokHam().map(r => {
+  if (bos) return ham;
+  return ham.map(r => {
     const ek = +d[(r.f || '') + '|' + (r.k || '')] || 0;
     if (!ek) return r;
     const y = { ...r };
@@ -3712,6 +3883,22 @@ function stokView(){
             + `<button class="sbek-x" data-act="stok-bek-sil" data-id="${esc(x.id)}">&times;</button></div>`;
         }).join('')
       + (bek.length > 10 ? `<div class="sbek-r"><span class="sbek-i">${bek.length - 10} hareket daha…</span></div>` : '')
+      + '</div>';
+  }
+  /* FAZ 3b: Excel'e işlenmemiş KALEM işlemleri */
+  const bekK = stokKalemBekleyen().filter(k => !S.stk.firma || k.firma === S.stk.firma);
+  if (bekK.length){
+    h += `<div class="sbek"><div class="sbek-h">KALEM İŞLEMLERİ (${bekK.length})</div>`
+      + bekK.slice(0, 10).map(k => {
+          const sl = k.tip === 'sil';
+          return `<div class="sbek-r"><span class="sbek-t">${esc(k.tarih || '')}</span>`
+            + `<b class="${sl ? 'cik' : 'gir'}">${sl ? 'KALEM SİL' : 'YENİ KALEM'}</b>`
+            + `<span class="sbek-k">${esc(k.kod || '')}</span>`
+            + `<span class="sbek-i">${esc([k.cins, k.renk, k.ebat].filter(Boolean).join(' · '))}`
+            + `${(!sl && (+k.adet || 0)) ? ' · açılış ' + (+k.adet || 0) + ' boy' : ''}</span>`
+            + `<button class="sbek-x" data-act="stok-kalem-geri" data-id="${esc(k.id)}">&times;</button></div>`;
+        }).join('')
+      + (bekK.length > 10 ? `<div class="sbek-r"><span class="sbek-i">${bekK.length - 10} işlem daha…</span></div>` : '')
       + '</div>';
   }
   h += `<div class="mstrip">
@@ -4392,6 +4579,23 @@ document.addEventListener('click', async (e) => {
     stokSecenek = null; stokOnayAc(h, r); return;
   }
   if (a === 'stok-kaydet'){ stokKaydet(); return; }
+  if (a === 'kalem-kaydet'){ kalemKaydet(); return; }
+  if (a === 'kalem-sil'){ kalemSil(); return; }
+  if (a === 'kalem-ac-teklif'){
+    const kb = kalemBek; kalemBek = null;
+    const o = (kb && kb.o) || {};
+    komutKalemAc({ stokKod: o.stokKod, stokFirma: o.stokFirma, stokMiktar: 0 });
+    return;
+  }
+  if (a === 'kalem-sil-sec'){
+    const h = stokSecenek; if (!h || !h.aday) return;
+    const r = h.aday[+(b.dataset.i ?? -1)]; if (!r) return;
+    stokSecenek = null; kalemSilAc(r); return;
+  }
+  if (a === 'stok-kalem-geri'){
+    if (confirm('Bu bekleyen kalem işlemi geri alınsın mı?')) S.store.remove('stokKalem', id);
+    return;
+  }
   if (a === 'foto-panel'){ fotoAc(b.dataset.k, b.dataset.b || ''); return; }
   if (a === 'konum-panel'){ konumAc(b.dataset.k, b.dataset.b || ''); return; }
   if (a === 'mal-panel'){ malAc(b.dataset.id); return; }
@@ -4633,6 +4837,7 @@ function bind(store, label, kind){
   S.unsub.push(store.subscribe('muhasebe', rows => { S.muhasebe = rows; if (S.tab === 'muh') render(); }));
   S.unsub.push(store.subscribe('stok', rows => { S.stok = rows; if (S.tab === 'stok') render(); }));
   S.unsub.push(store.subscribe('stokHareket', rows => { S.stokHareket = rows; if (S.tab === 'stok') render(); }));
+  S.unsub.push(store.subscribe('stokKalem', rows => { S.stokKalem = rows; if (S.tab === 'stok') render(); }));
   S.unsub.push(store.subscribe('foto', rows => { S.foto = rows; render(); }));
   S.unsub.push(store.subscribe('konum', rows => { S.konum = rows; render(); }));
   S.unsub.push(store.subscribe('odemeOnay', rows => { S.odemeOnay = rows; if (S.tab === 'muh') render(); }));
