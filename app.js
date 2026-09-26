@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.26-alfabe";
+const APP_VERSION = "2026.09.26-grup";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -3851,7 +3851,21 @@ function stokSuz(){
     if (S.stk.firma && r.f !== S.stk.firma) return false;
     if (q && !araUyar(stokAlanlar(r), q)) return false;   /* sesli komutla aynı eşleştirme */
     return true;
-  }).sort((a, b) => String(a.k || '').localeCompare(String(b.k || ''), 'tr', { numeric: true, sensitivity: 'base' }));
+  }).sort((a, b) => {
+    const ga = stokGrup(a), gb = stokGrup(b);
+    if (ga !== gb) return ga - gb;
+    return String(a.k || '').localeCompare(String(b.k || ''), 'tr', { numeric: true, sensitivity: 'base' });
+  });
+}
+/* AKILLI SIRA (Mert 26.09.2026): ürün ailesi — 1 Süpürgelik · 2 Kapı Kasası · 3 Ofis Bölme · 9 Diğer.
+   Her aile KENDİ İÇİNDE koda göre Türkçe alfabetik. Önce CİNS metni, tutmazsa KOD öneki. */
+function stokGrup(x){
+  const t = ((x.c || '') + ' ' + (x.d || '')).toLocaleUpperCase('tr');
+  const k = String(x.k || '').toLocaleUpperCase('tr');
+  if (t.includes('SÜPÜRGELİK') || t.includes('İÇ PARÇA') || k.startsWith('B11')) return 1;
+  if (t.includes('KAPI KASASI') || t.includes('KASA') || t.includes('KANAT') || k.startsWith('B12')) return 2;
+  if (t.includes('BÖLME') || k.startsWith('C38') || k.startsWith('D120') || k.startsWith('B-')) return 3;
+  return 9;
 }
 function stokView(){
   const meta = S.stok.find(x => x.id === 'meta');
