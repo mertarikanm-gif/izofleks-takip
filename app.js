@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.26-hfoto";
+const APP_VERSION = "2026.09.26-detay";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -97,7 +97,7 @@ const S = {
   malOv: null,         // açık maliyet panosu: { isId, kat }
   gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
-  stk: { firma:'', ara:'', limit:60, mod:'stok', hlimit:40 },
+  stk: { firma:'', ara:'', limit:60, mod:'stok', hlimit:40, acik:'' },
   a42: { isler: [], teklifler: [], faturalar: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
   itSec: '',           // İş Takip'te açık satır: 'is:<is_id>' | 'tk:<id>'
   itOv: null,          // İş Takip işlem penceresi: { tip:'red'|'kabul', id, ... }
@@ -3858,13 +3858,67 @@ function hFotoSay(hk, hid){
 function hFotoHedef(hk, hid){
   return (hid && fotoSayi('stok:' + hid) > 0) ? ('stok:' + hid) : hk;
 }
+/* EN YENİ ÜSTTE. Excel satır sırası tarih sırası değil; tarihi boş satır üstündeki
+   satırın grubuna aittir → sıralarken o tarihi devralır (ekranda yine boş görünür).
+   Eşit tarihte Excel'de ALTTA olan daha yenidir. */
+function stokHarSirala(L){
+  let son = 0;
+  return (L || []).map((h, i) => {
+    const t = String(h.t || '').trim(); let ms = 0;
+    if (t){
+      const m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+      if (m) ms = Date.UTC(+m[3], +m[2] - 1, +m[1]);
+      else { const d = new Date(t); if (!isNaN(d.getTime())) ms = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); }
+    }
+    if (ms) son = ms; else ms = son;
+    return { h, i, ms };
+  }).sort((a, b) => (b.ms - a.ms) || (b.i - a.i)).map(x => x.h);
+}
 function stokHarSuz(){
   const q = (S.stk.ara || '').trim();
-  return stokHareketler().filter(h => {
+  return stokHarSirala(stokHareketler().filter(h => {
     if (S.stk.firma && h.f !== S.stk.firma) return false;
     if (q && !araUyar([h.k, h.i, h.c, h.r, h.e, h.t], q)) return false;
     return true;
-  }).reverse();   /* en yeni üstte */
+  }));
+}
+/* Kaleme dokununca açılan panel: o kodun son hareketleri + bekleyenler */
+function stokKodDetay(kod, firma){
+  kod = String(kod || '');
+  const L = stokHarSirala(stokHareketler().filter(h => String(h.k || '') === kod
+              && (!firma || h.f === firma)));
+  const bek = stokBekleyen().filter(b => String(b.kod || '') === kod
+              && (!firma || b.firma === firma));
+  let g = 0, c = 0;
+  L.forEach(x => { if (x.y === 'G') g += (+x.m || 0); else c += (+x.m || 0); });
+  return { liste: L, bek, giris: g, cikis: c };
+}
+function stokDetayHtml(kod, firma){
+  const R = stokKodDetay(kod, firma), N = 10, son = R.liste.slice(0, N);
+  const sat = x => {
+    const g = (x.y === 'G'), n = hFotoSay(x.hk, x.hid);
+    const bs = (g ? 'GİRİŞ' : 'ÇIKIŞ') + ' · ' + (x.k || '') + ' · ' + (x.t || '');
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--cz,#E7ECF2)">
+      <span style="font-weight:800;font-size:11px;min-width:44px;color:${g ? '#2F8F5B' : '#C9563A'}">${g ? 'GİRİŞ' : 'ÇIKIŞ'}</span>
+      <span style="font-size:11.5px;color:#7C8DA4;min-width:74px">${esc(x.t || '')}</span>
+      <span style="flex:1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([x.i, x.c].filter(Boolean).join(' · '))}</span>
+      <b style="font-size:12.5px;color:${g ? '#2F8F5B' : '#C9563A'}">${g ? '+' : '−'}${(+x.m || 0)}</b>
+      <button class="sbek-f${n ? ' var' : ''}" data-act="foto-panel" data-k="${esc(hFotoHedef(x.hk, x.hid))}" data-b="${esc(bs)}" title="Fotoğraf">${ICON_CAM}${n || ''}</button>
+    </div>`;
+  };
+  const bekH = R.bek.length ? `<div style="background:#FFFBF0;border:1px solid #E8D9A8;border-radius:8px;padding:6px 9px;margin-bottom:6px">
+      <div style="font-size:10.5px;font-weight:800;color:#8A5A11;margin-bottom:2px">BEKLEYEN</div>`
+    + R.bek.map(b => `<div style="font-size:11.5px;color:#5A4520;padding:1px 0">${esc(b.tarih || '')} · <b>${esc(b.yon || '')}</b> ${Math.abs(+b.adetEtki || 0)}${b.is ? ' · ' + esc(b.is) : ''}</div>`).join('')
+    + '</div>' : '';
+  return `<div style="margin:-6px 0 8px;padding:9px 11px;background:var(--kart,#fff);border:1px solid var(--cz,#DDE4EC);border-left:3px solid #1F3864;border-radius:0 10px 10px 0">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+      <b style="font-size:12px;color:#1F3864">${esc(kod)} — son giriş/çıkış</b>
+      <span style="font-size:11px;color:#7C8DA4">${R.liste.length} hareket · <b style="color:#2F8F5B">Giriş ${Math.round(R.giris * 100) / 100}</b> / <b style="color:#C9563A">Çıkış ${Math.round(R.cikis * 100) / 100}</b></span>
+    </div>
+    ${bekH}
+    ${son.length ? son.map(sat).join('') : '<div style="padding:8px 0;color:#9AA5B1;font-size:11.5px">Bu kaleme ait kayıtlı hareket yok</div>'}
+    ${R.liste.length > son.length ? `<button class="mmore" data-act="stk-kfoto" data-v="${esc(kod)}" style="margin-top:7px">Tümünü gör (${R.liste.length} hareket) →</button>` : ''}
+  </div>`;
 }
 /* Kalem kartı için: o kodun tüm hareketlerindeki toplam foto (salt okunur rozet) */
 function stokKalemFotoSay(){
@@ -3998,7 +4052,8 @@ function stokView(){
     <div class="mkut"><span>Toplam kg</span><b>${kg.toLocaleString('tr-TR',{maximumFractionDigits:1})}</b></div>
   </div><div class="mlist">`;
   gor.forEach(r => {
-    h += `<div class="mrow ${r.f === 'tars' ? 'gd' : 'gl'}">
+    const _ac = (S.stk.acik === String(r.k || ''));
+    h += `<div class="mrow ${r.f === 'tars' ? 'gd' : 'gl'}" data-act="stk-detay" data-v="${esc(r.k || '')}" style="cursor:pointer${_ac ? ';box-shadow:inset 0 0 0 2px #1F3864' : ''}">
       <div class="mr-1"><span class="myon ${r.f === 'tars' ? 'g' : 'l'}">${r.f === 'tars' ? 'TARS' : 'İZOFLEKS'}</span>
         <span class="mtar">${esc(r.c || '')}${r.d ? ' · ' + esc(r.d) : ''}</span>
         <span class="mrz ${r.bek ? 'bk' : ((+r.a || 0) > 0 ? 'ok' : 'ks')}">${(+r.a || 0)} ad${r.bek ? ` (${r.bek > 0 ? '+' : ''}${r.bek})` : ''}</span></div>
@@ -4007,6 +4062,7 @@ function stokView(){
         <span class="mtut">${r.b ? esc(String(r.b)) + ' m' : ''}${r.kg ? `<em>${(+r.kg).toLocaleString('tr-TR',{maximumFractionDigits:1})} kg</em>` : ''}</span></div>
       ${r.n ? `<div class="mr-4">${esc(r.n)}</div>` : ''}
     </div>`;
+    if (_ac) h += stokDetayHtml(String(r.k || ''), r.f || '');
   });
   h += '</div>';
   if (L.length > gor.length)
@@ -4530,10 +4586,12 @@ document.addEventListener('click', async (e) => {
   }
   if (a === 'muh-f'){ S.muh[b.dataset.k] = b.dataset.v; S.muh.limit = 60; render(); return; }
   if (a === 'muh-more'){ S.muh.limit += 120; render(); return; }
-  if (a === 'stk-f'){ S.stk[b.dataset.k] = b.dataset.v; S.stk.limit = 60; S.stk.hlimit = 40; render(); return; }
-  if (a === 'stk-mod'){ S.stk.mod = b.dataset.v; S.stk.limit = 60; S.stk.hlimit = 40; render(); return; }
+  if (a === 'stk-f'){ S.stk[b.dataset.k] = b.dataset.v; S.stk.limit = 60; S.stk.hlimit = 40; S.stk.acik = ''; render(); return; }
+  if (a === 'stk-mod'){ S.stk.mod = b.dataset.v; S.stk.limit = 60; S.stk.hlimit = 40; S.stk.acik = ''; render(); return; }
+  /* kalem kartına dokun → o kodun son giriş/çıkışları altta açılır (Mert 26.09.2026) */
+  if (a === 'stk-detay'){ const k = b.dataset.v || ''; S.stk.acik = (S.stk.acik === k) ? '' : k; render(); return; }
   if (a === 'stk-hmore'){ S.stk.hlimit += 40; render(); return; }
-  if (a === 'stk-kfoto'){ S.stk.mod = 'hareket'; S.stk.ara = b.dataset.v || ''; S.stk.hlimit = 40; render(); return; }
+  if (a === 'stk-kfoto'){ S.stk.mod = 'hareket'; S.stk.ara = b.dataset.v || ''; S.stk.hlimit = 40; S.stk.acik = ''; render(); return; }
   if (a === 'stk-more'){ S.stk.limit += 120; render(); return; }
   if (a === 'a42-yenile'){ S.a42.at = 0; loadA42(false).then(render); return; }
 
