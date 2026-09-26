@@ -6,7 +6,7 @@
 */
 "use strict";
 
-const APP_VERSION = "2026.09.26-grup";
+const APP_VERSION = "2026.09.26-hfoto";
 const FB_VER = "10.12.2";
 const FB = (m) => `https://www.gstatic.com/firebasejs/${FB_VER}/firebase-${m}.js`;
 
@@ -97,7 +97,7 @@ const S = {
   malOv: null,         // açık maliyet panosu: { isId, kat }
   gaAcik: false,       // geri al paneli
   muh: { yon:'', ara:'', odeme:'', limit:60 },
-  stk: { firma:'', ara:'', limit:60 },
+  stk: { firma:'', ara:'', limit:60, mod:'stok', hlimit:40 },
   a42: { isler: [], teklifler: [], faturalar: [], at: 0, hata: '' },   // A42 widget'tan gelen devam eden işler
   itSec: '',           // İş Takip'te açık satır: 'is:<is_id>' | 'tk:<id>'
   itOv: null,          // İş Takip işlem penceresi: { tip:'red'|'kabul', id, ... }
@@ -3843,6 +3843,38 @@ function stokListe(){
     return y;
   });
 }
+/* ── GİRİŞ/ÇIKIŞ HAREKETLERİ (Mert 26.09.2026) ────────────────────────────────
+   Masaüstü TERM son 300 hareketi 'stok/hareket' belgesine yazar. Fotoğraf anahtarı
+   (hk) masaüstünde üretilir; 'hid' işlenmiş bekleyen kaydın eski Firestore id'sidir —
+   o dönemde çekilen fotoğraflar kaybolmasın diye ikisi de sayılır. */
+function stokHareketler(){
+  const d = S.stok.find(x => x.id === 'hareket');
+  return (d && Array.isArray(d.l)) ? d.l : [];
+}
+function hFotoSay(hk, hid){
+  return fotoSayi(hk) + (hid ? fotoSayi('stok:' + hid) : 0);
+}
+/* Eski fotoğraflar hid'de duruyorsa paneli orada aç, yoksa kalıcı anahtarda */
+function hFotoHedef(hk, hid){
+  return (hid && fotoSayi('stok:' + hid) > 0) ? ('stok:' + hid) : hk;
+}
+function stokHarSuz(){
+  const q = (S.stk.ara || '').trim();
+  return stokHareketler().filter(h => {
+    if (S.stk.firma && h.f !== S.stk.firma) return false;
+    if (q && !araUyar([h.k, h.i, h.c, h.r, h.e, h.t], q)) return false;
+    return true;
+  }).reverse();   /* en yeni üstte */
+}
+/* Kalem kartı için: o kodun tüm hareketlerindeki toplam foto (salt okunur rozet) */
+function stokKalemFotoSay(){
+  const d = {};
+  stokHareketler().forEach(h => {
+    const n = hFotoSay(h.hk, h.hid); if (!n) return;
+    d[h.k] = (d[h.k] || 0) + n;
+  });
+  return d;
+}
 function stokSuz(){
   const q = (S.stk.ara || '').trim();
   /* Ürün koduna göre ALFABETİK sıra (Mert 26.09.2026) — Türkçe harf sırası + sayılar
@@ -3877,12 +3909,17 @@ function stokView(){
   const L = stokSuz(), gor = L.slice(0, S.stk.limit);
   const kg = L.reduce((s, r) => s + (+r.kg || 0), 0);
   const ad = L.reduce((s, r) => s + (+r.a || 0), 0);
+  const harMod = (S.stk.mod === 'hareket');
   let h = '<div class="mwrap"><div class="mfilt"><div class="mseg">'
     + `<button class="msg${S.stk.firma === '' ? ' on' : ''}" data-act="stk-f" data-k="firma" data-v="">Hepsi</button>`
     + `<button class="msg${S.stk.firma === 'izofleks' ? ' on' : ''}" data-act="stk-f" data-k="firma" data-v="izofleks">İzofleks</button>`
     + `<button class="msg${S.stk.firma === 'tars' ? ' on' : ''}" data-act="stk-f" data-k="firma" data-v="tars">TARS</button>`
     + '</div>'
-    + `<input class="mara" id="s-ara" type="search" placeholder="Kod, cins, renk, ebat…" value="${esc(S.stk.ara)}">`
+    + `<input class="mara" id="s-ara" type="search" placeholder="${harMod ? 'Kod, iş, renk, tarih…' : 'Kod, cins, renk, ebat…'}" value="${esc(S.stk.ara)}">`
+    + '</div>'
+    + '<div class="mseg" style="margin-top:6px">'
+    + `<button class="msg${!harMod ? ' on' : ''}" data-act="stk-mod" data-v="stok">Güncel Stok</button>`
+    + `<button class="msg${harMod ? ' on' : ''}" data-act="stk-mod" data-v="hareket">Giriş / Çıkış</button>`
     + '</div>';
   /* FAZ 3: Excel'e işlenmemiş hareketler */
   const bek = stokBekleyen();
@@ -3917,6 +3954,44 @@ function stokView(){
       + (bekK.length > 10 ? `<div class="sbek-r"><span class="sbek-i">${bekK.length - 10} işlem daha…</span></div>` : '')
       + '</div>';
   }
+  if (harMod){
+    const H = stokHarSuz(), hgor = H.slice(0, S.stk.hlimit);
+    const gir = H.filter(x => x.y === 'G').reduce((s, x) => s + (+x.m || 0), 0);
+    const cik = H.filter(x => x.y !== 'G').reduce((s, x) => s + (+x.m || 0), 0);
+    if (!stokHareketler().length){
+      h += `<div class="mbos"><h3>Hareket verisi yok</h3><p>Giriş/çıkış listesi bilgisayardaki
+        TERM'den gönderilir. Bilgisayarda <b>TERM → Muhasebe</b> ekranını bir kez aç.</p></div></div>`;
+      return h;
+    }
+    h += `<div class="mstrip">
+      <div class="mkut"><span>Hareket</span><b>${H.length}</b></div>
+      <div class="mkut"><span>Giriş</span><b>${gir.toLocaleString('tr-TR')}</b></div>
+      <div class="mkut"><span>Çıkış</span><b>${cik.toLocaleString('tr-TR')}</b></div>
+    </div><div class="mlist">`;
+    hgor.forEach(x => {
+      const g = (x.y === 'G'), n = hFotoSay(x.hk, x.hid);
+      const bs = (g ? 'GİRİŞ' : 'ÇIKIŞ') + ' · ' + (x.k || '') + ' · ' + (x.t || '');
+      /* renk: GİRİŞ yeşil (g), ÇIKIŞ kırmızı (l) — kalem kartındaki firma renginin tersi */
+      h += `<div class="mrow ${g ? 'gd' : 'gl'}">
+        <div class="mr-1"><span class="myon ${g ? 'g' : 'l'}">${g ? 'GİRİŞ' : 'ÇIKIŞ'}</span>
+          <span class="mtar">${esc(x.t || '')}${x.f === 'tars' ? ' · TARS' : ''}</span>
+          <span class="mrz ${g ? 'ok' : 'ks'}">${g ? '+' : '−'}${(+x.m || 0)}</span></div>
+        <div class="mr-2 mkod">${esc(x.k || '')}</div>
+        <div class="mr-3"><span class="mno">${esc([x.i, x.c].filter(Boolean).join(' · '))}</span>
+          <span class="mtut">${esc([x.r, x.e ? x.e + ' m' : ''].filter(Boolean).join(' · '))}</span></div>
+        <div class="mr-4" style="display:flex;align-items:center;gap:8px">
+          <span style="flex:1;color:#7C8DA4">${esc(x.ts || '')}</span>
+          <button class="sbek-f${n ? ' var' : ''}" data-act="foto-panel" data-k="${esc(hFotoHedef(x.hk, x.hid))}" data-b="${esc(bs)}" title="Fotoğraf">${ICON_CAM}${n || ''}</button>
+        </div>
+      </div>`;
+    });
+    h += '</div>';
+    if (H.length > hgor.length)
+      h += `<button class="mmore" data-act="stk-hmore">+${H.length - hgor.length} hareket daha göster</button>`;
+    h += `<p class="mnot">Son 300 hareket · fotoğraflar harekete bağlıdır</p></div>`;
+    return h;
+  }
+  const fotoKod = stokKalemFotoSay();
   h += `<div class="mstrip">
     <div class="mkut"><span>Kalem</span><b>${L.length}</b></div>
     <div class="mkut"><span>Toplam adet</span><b>${ad.toLocaleString('tr-TR')}</b></div>
@@ -3927,7 +4002,7 @@ function stokView(){
       <div class="mr-1"><span class="myon ${r.f === 'tars' ? 'g' : 'l'}">${r.f === 'tars' ? 'TARS' : 'İZOFLEKS'}</span>
         <span class="mtar">${esc(r.c || '')}${r.d ? ' · ' + esc(r.d) : ''}</span>
         <span class="mrz ${r.bek ? 'bk' : ((+r.a || 0) > 0 ? 'ok' : 'ks')}">${(+r.a || 0)} ad${r.bek ? ` (${r.bek > 0 ? '+' : ''}${r.bek})` : ''}</span></div>
-      <div class="mr-2 mkod">${esc(r.k || '')}</div>
+      <div class="mr-2 mkod">${esc(r.k || '')}${(fotoKod[r.k] || 0) ? `<button class="sbek-f var" data-act="stk-kfoto" data-v="${esc(r.k)}" title="Bu kalemin hareket fotoğrafları" style="margin-left:7px">${ICON_CAM}${fotoKod[r.k]}</button>` : ''}</div>
       <div class="mr-3"><span class="mno">${esc([r.e, r.r].filter(Boolean).join(' · '))}</span>
         <span class="mtut">${r.b ? esc(String(r.b)) + ' m' : ''}${r.kg ? `<em>${(+r.kg).toLocaleString('tr-TR',{maximumFractionDigits:1})} kg</em>` : ''}</span></div>
       ${r.n ? `<div class="mr-4">${esc(r.n)}</div>` : ''}
@@ -4455,7 +4530,10 @@ document.addEventListener('click', async (e) => {
   }
   if (a === 'muh-f'){ S.muh[b.dataset.k] = b.dataset.v; S.muh.limit = 60; render(); return; }
   if (a === 'muh-more'){ S.muh.limit += 120; render(); return; }
-  if (a === 'stk-f'){ S.stk[b.dataset.k] = b.dataset.v; S.stk.limit = 60; render(); return; }
+  if (a === 'stk-f'){ S.stk[b.dataset.k] = b.dataset.v; S.stk.limit = 60; S.stk.hlimit = 40; render(); return; }
+  if (a === 'stk-mod'){ S.stk.mod = b.dataset.v; S.stk.limit = 60; S.stk.hlimit = 40; render(); return; }
+  if (a === 'stk-hmore'){ S.stk.hlimit += 40; render(); return; }
+  if (a === 'stk-kfoto'){ S.stk.mod = 'hareket'; S.stk.ara = b.dataset.v || ''; S.stk.hlimit = 40; render(); return; }
   if (a === 'stk-more'){ S.stk.limit += 120; render(); return; }
   if (a === 'a42-yenile'){ S.a42.at = 0; loadA42(false).then(render); return; }
 
